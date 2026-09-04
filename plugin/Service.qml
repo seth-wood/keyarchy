@@ -120,6 +120,8 @@ Item {
     var keys = Model.keysForAction(match, root.binds)
     if (!keys) return
 
+    console.log("omarkey teach " + match.action + " -> " + keys)
+
     notifyProcess.command = [
       "omarchy-notification-send",
       "-u", "low",
@@ -203,6 +205,15 @@ Item {
 
   Component.onCompleted: {
     ensureStateDir.running = true
+
+    // Quickshell connects the Hyprland event socket lazily, on first use of the
+    // singleton's state. A bare Connections block is not "use", so without this
+    // touch rawEvent never fires for a headless service.
+    var connected = Hyprland.workspaces !== null
+
+    bindsFile.reload()
+    stateFile.reload()
     refreshBinds()
+    console.log("omarkey service-ready id=" + root.pluginId + " hyprland=" + connected)
   }
 }

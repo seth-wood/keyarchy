@@ -134,6 +134,25 @@ test/
   shim.test.lua        lua test/shim.test.lua -- mocks hl, no compositor needed
 ```
 
+## Notes for hacking on it
+
+- **Quickshell connects the Hyprland event socket lazily.** A bare
+  `Connections { target: Hyprland }` in a headless service never fires, because
+  declaring the connection does not count as using the singleton. `Service.qml`
+  touches `Hyprland.workspaces` at startup to force the connection. Remove that
+  line and Omarkey goes silent with no error.
+- **Editing the repo does not update the installed plugin.** Re-run
+  `./install.sh`, or copy the file, then `omarchy restart shell` — a service
+  plugin is mounted at shell startup, so `omarchy plugin enable` mid-session is
+  not enough on a first install.
+- **Deleting `state.json` needs a shell restart.** The running service holds the
+  nag history in memory and only reads the file at startup, so removing it on
+  disk alone will look like nothing happened.
+- Omarchy 4 dispatches in Lua, so testing by hand means
+  `hyprctl dispatch "hl.dsp.focus({ workspace = '5' })"`, not
+  `hyprctl dispatch workspace 5`. The old syntax fails silently enough to waste
+  an afternoon.
+
 ## Caveats
 
 - **The shim wraps every keybind on your machine.** `test/shim.test.lua` mocks

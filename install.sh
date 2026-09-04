@@ -40,18 +40,26 @@ else
 
   # The shim must wrap hl.bind before Omarchy registers any binding.
   awk -v line="$SHIM_LINE" -v anchor="$ANCHOR" '
-    index($0, anchor) && !done { print "-- Omarkey: wrap hl.bind before any binding is registered."; print line; print ""; done = 1 }
+    index($0, anchor) && !done { print "-- Omarkey: wrap hl.bind before any binding is registered."; print line; done = 1 }
     { print }
   ' "$HYPRLAND_LUA" > "$HYPRLAND_LUA.omarkey-tmp"
   mv "$HYPRLAND_LUA.omarkey-tmp" "$HYPRLAND_LUA"
 fi
 
-omarchy plugin enable "$PLUGIN_ID" >/dev/null 2>&1 || true
+# The shell rescans plugin folders on its own, but `plugin enable` fails with
+# "unknown plugin" if it runs before that lands on a freshly copied folder.
+enabled=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if omarchy plugin enable "$PLUGIN_ID" >/dev/null 2>&1; then enabled=1; break; fi
+  sleep 0.5
+done
+[[ $enabled == 1 ]] || echo "omarkey: could not enable automatically; run 'omarchy plugin enable $PLUGIN_ID'" >&2
 
 if command -v hyprctl >/dev/null && [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
   hyprctl reload >/dev/null
-  errors="$(hyprctl configerrors)"
-  if [[ $errors != *"no errors"* ]]; then
+  # Hyprland prints nothing here when the config is clean.
+  errors="$(hyprctl configerrors | grep -v '^[[:space:]]*$' || true)"
+  if [[ -n $errors ]]; then
     echo "omarkey: Hyprland reported config errors after reload:" >&2
     echo "$errors" >&2
     echo "omarkey: run ./uninstall.sh to back this out" >&2
