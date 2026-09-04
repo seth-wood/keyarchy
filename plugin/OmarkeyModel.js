@@ -97,7 +97,7 @@ function mergeConfig(overrides) {
 }
 
 function emptyState() {
-  return { counts: {}, lastAt: {}, lastAnyAt: 0 }
+  return { counts: {}, lastAt: {}, meta: {}, lastAnyAt: 0 }
 }
 
 // "code:12" -> "3", "LEFT" -> "left arrow glyph", anything else uppercased.
@@ -307,11 +307,118 @@ function shouldNotify(action, now, state, config) {
   return true
 }
 
-function recordNotified(action, now, state) {
+function recordNotified(action, now, state, match, keys) {
   state.counts[action] = (state.counts[action] || 0) + 1
   state.lastAt[action] = now
   state.lastAnyAt = now
+  if (match) state.meta[action] = { description: match.description, keys: keys || "" }
   return state
+}
+
+// ------------------------------------------------------------------ panel
+
+function parseCounts(text) {
+  try {
+    var parsed = JSON.parse(String(text || "{}"))
+    return parsed && typeof parsed === "object" ? parsed : {}
+  } catch (error) {
+    return {}
+  }
+}
+
+// How much of your own keymap you actually reach for. `usage` is keyed by bind
+// description and filled in from the shim's beacon, one entry per activation.
+function usageSummary(binds, usage) {
+  var total = 0
+  var used = 0
+
+  for (var description in binds) {
+    total++
+    if ((usage[description] || 0) > 0) used++
+  }
+
+  return { used: used, total: total }
+}
+
+// Bindings you have never once triggered, most useful first. Ordering is
+// alphabetical rather than arbitrary so the list is stable between reads.
+function unusedBinds(binds, usage) {
+  var list = []
+
+  for (var description in binds) {
+    if ((usage[description] || 0) > 0) continue
+    list.push({ description: description, keys: binds[description] })
+  }
+
+  list.sort(function(a, b) { return a.description < b.description ? -1 : a.description > b.description ? 1 : 0 })
+  return list
+}
+
+// Deterministic for a given offset, so "show another" walks the list instead
+// of reshuffling and repeating what it just showed.
+function sampleUnused(list, offset, count) {
+  var picked = []
+  if (list.length === 0) return picked
+
+  for (var i = 0; i < count && i < list.length; i++) {
+    picked.push(list[(offset + i) % list.length])
+  }
+  return picked
+}
+
+// A readable label for an action recorded before its description was stored,
+// so an older history reads as "Close window" rather than "close-window".
+function describeAction(action) {
+  var parts = String(action || "").split(":")
+
+  switch (parts[0]) {
+    case "workspace": return "Switch to workspace " + parts[1]
+    case "move-to-workspace": return "Move window to workspace " + parts[1]
+    case "close-window": return "Close window"
+    case "fullscreen": return "Full screen"
+    case "toggle-float": return "Toggle window floating/tiling"
+    case "focus-window": return "Focus another window"
+    case "launch": return parts.slice(1).join(":")
+  }
+
+  return String(action || "")
+}
+
+// Lessons already delivered, most recently taught first, with the ones that
+// hit the lifetime cap marked so you can see what you have finished learning.
+function lessonRows(state, config) {
+  var rows = []
+
+  for (var action in state.counts) {
+    var meta = state.meta && state.meta[action] ? state.meta[action] : {}
+    rows.push({
+      action: action,
+      description: meta.description || describeAction(action),
+      keys: meta.keys || "",
+      count: state.counts[action],
+      lastAt: state.lastAt[action] || 0,
+      graduated: state.counts[action] >= config.lifetimeCap,
+      muted: config.muted.indexOf(action) !== -1
+    })
+  }
+
+  rows.sort(function(a, b) { return b.lastAt - a.lastAt })
+  return rows
+}
+
+// Toggling one entry of the muted list, returned as a new array so the caller
+// can hand it straight to a config write.
+function toggleMuted(muted, action) {
+  var next = []
+  var removed = false
+
+  for (var i = 0; i < muted.length; i++) {
+    if (muted[i] === action) { removed = true; continue }
+    next.push(muted[i])
+  }
+
+  if (!removed) next.push(action)
+  return next
 }
 
 function notificationBody(description, keys) {
@@ -335,6 +442,13 @@ if (typeof module !== "undefined") {
     categoryFor: categoryFor,
     shouldNotify: shouldNotify,
     recordNotified: recordNotified,
+    parseCounts: parseCounts,
+    usageSummary: usageSummary,
+    unusedBinds: unusedBinds,
+    sampleUnused: sampleUnused,
+    describeAction: describeAction,
+    lessonRows: lessonRows,
+    toggleMuted: toggleMuted,
     notificationBody: notificationBody
   }
 }

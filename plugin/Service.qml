@@ -22,19 +22,33 @@ Item {
   readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
   readonly property string stateDir: home + "/.local/state/omarkey"
   readonly property string statePath: stateDir + "/state.json"
+  readonly property string usagePath: stateDir + "/usage.json"
   readonly property string beaconPath: runtimeDir + "/omarkey/last-bind"
   readonly property string bindsPath: runtimeDir + "/omarkey/binds.json"
 
   readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "slw.omarkey"
 
-  // Config rides along in this plugin's shell.json entry, the same way bar
-  // widgets carry theirs: { "id": "slw.omarkey", "lifetimeCap": 3 }.
+  // Config rides along in this plugin's shell.json entry. The bar widget and
+  // the service share it, so this mirrors the precedence shell.qml's
+  // updateEntryInline writes with: the bar layout entry when the widget is on
+  // the bar, the top-level plugins[] entry otherwise.
   readonly property var pluginConfig: {
     var config = shell && shell.shellConfig ? shell.shellConfig : null
-    if (!config || !Array.isArray(config.plugins)) return ({})
+    if (!config) return ({})
 
-    for (var i = 0; i < config.plugins.length; i++) {
-      var entry = config.plugins[i]
+    var sections = ["left", "center", "right"]
+    var layout = config.bar && config.bar.layout ? config.bar.layout : null
+    for (var s = 0; layout && s < sections.length; s++) {
+      var entries = layout[sections[s]]
+      if (!Array.isArray(entries)) continue
+      for (var i = 0; i < entries.length; i++) {
+        if (entries[i] && String(entries[i].id) === root.pluginId) return entries[i]
+      }
+    }
+
+    if (!Array.isArray(config.plugins)) return ({})
+    for (var j = 0; j < config.plugins.length; j++) {
+      var entry = config.plugins[j]
       if (entry && String(entry.id) === root.pluginId) return entry
     }
     return ({})
@@ -47,6 +61,12 @@ Item {
   property var state: Model.emptyState()
   property real lastBeaconAt: 0
   property var pending: []
+
+  // Which bindings you actually press, counted by description. The beacon
+  // already names the bind that fired, so this needs nothing extra from the
+  // shim -- every activation passes through here anyway.
+  property var usage: ({})
+  property bool usageDirty: false
 
   // A keybind's beacon write and its Hyprland event race each other, so hold
   // judgment briefly and accept a beacon from either side of the event.
@@ -63,12 +83,40 @@ Item {
     root.shimBindsLoaded = true
   }
 
+  function loadUsage(text) {
+    root.usage = Model.parseCounts(text)
+  }
+
+  // The beacon file names the bind that just fired. Reading it is what makes
+  // "shortcuts you have never used" possible.
+  function countUsage(text) {
+    var description = String(text || "").split("\n")[0]
+    if (description === "") return
+
+    var next = ({})
+    for (var key in root.usage) next[key] = root.usage[key]
+    next[description] = (next[description] || 0) + 1
+
+    root.usage = next
+    root.usageDirty = true
+    usagePersistTimer.restart()
+  }
+
+  // Debounced: a fast typist can fire several binds a second, and this is a
+  // real disk write rather than the shim's tmpfs one.
+  function persistUsage() {
+    if (!root.usageDirty) return
+    root.usageDirty = false
+    usageFile.setText(JSON.stringify(root.usage, null, 2) + "\n")
+  }
+
   function loadState(text) {
     var next = Model.emptyState()
     try {
       var parsed = JSON.parse(String(text || "{}")) || {}
       if (parsed.counts) next.counts = parsed.counts
       if (parsed.lastAt) next.lastAt = parsed.lastAt
+      if (parsed.meta) next.meta = parsed.meta
     } catch (error) {
       // A corrupt state file only costs us the nag history; start over.
     }
@@ -77,9 +125,10 @@ Item {
 
   function persistState() {
     stateFile.setText(JSON.stringify({
-      version: 1,
+      version: 2,
       counts: root.state.counts,
-      lastAt: root.state.lastAt
+      lastAt: root.state.lastAt,
+      meta: root.state.meta
     }, null, 2) + "\n")
   }
 
@@ -131,7 +180,7 @@ Item {
     ]
     notifyProcess.running = true
 
-    Model.recordNotified(match.action, now, root.state)
+    Model.recordNotified(match.action, now, root.state, match, keys)
     persistState()
   }
 
@@ -158,7 +207,29 @@ Item {
     path: root.beaconPath
     watchChanges: true
     printErrors: false
-    onFileChanged: root.lastBeaconAt = Date.now()
+    onFileChanged: {
+      // Timestamp first: suppression must not wait on the async read.
+      root.lastBeaconAt = Date.now()
+      reload()
+    }
+    onLoaded: root.countUsage(text())
+  }
+
+  FileView {
+    id: usageFile
+    path: root.usagePath
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadUsage(text())
+    onLoadFailed: root.loadUsage("{}")
+  }
+
+  Timer {
+    id: usagePersistTimer
+    interval: 5000
+    repeat: false
+    onTriggered: root.persistUsage()
   }
 
   FileView {
@@ -169,6 +240,9 @@ Item {
     printErrors: false
     onLoaded: root.loadState(text())
     onLoadFailed: root.loadState("{}")
+    // The panel resets progress by rewriting this file; pick that up live
+    // instead of holding stale counts until the next shell restart.
+    onFileChanged: reload()
   }
 
   Process {
@@ -213,6 +287,7 @@ Item {
 
     bindsFile.reload()
     stateFile.reload()
+    usageFile.reload()
     refreshBinds()
     console.log("omarkey service-ready id=" + root.pluginId + " hyprland=" + connected)
   }

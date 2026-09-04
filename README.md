@@ -84,12 +84,43 @@ Bindings are matched by their **description**, never by dispatcher. Rebind
 | Opened a bound app | that app's binding |
 | Changed window focus | `Focus on <direction> window` — **off by default** |
 
+Everything it teaches, plus everything you have never pressed, is visible in the
+bar widget below.
+
 Focus is off because it fires on nearly every interaction, including as a side
 effect of opening and closing windows. Turn it on if you want it.
 
 Not covered yet: opening the Omarchy menu, launcher, emoji picker, and clipboard
 by clicking the bar. Those are layer-shell surfaces rather than Hyprland window
 events and need separate detection.
+
+## The bar widget
+
+`./install.sh` installs it; put it on the bar with:
+
+```bash
+omarchy plugin enable slw.omarkey right
+```
+
+**Left click** opens the panel, **right click** toggles Omarkey off and on.
+
+The panel shows four things:
+
+- **How much of your keymap you actually reach for** — "6 of 212 shortcuts
+  used". The shim's beacon names the binding that fired, so the service counts
+  activations by description; nothing extra is needed to know what you press.
+- **Shortcuts you have never once used**, three at a time, with a button (or
+  `n`) to walk through the rest. This is the half of the problem notifications
+  can't reach: Omarkey can only teach you a shortcut for something you did, and
+  most of the 212 are for things you have never thought to do.
+- **Teaching switches** for the four categories, including the focus category
+  that is otherwise off in a config file you'd have to know about.
+- **What it has taught you**, newest first, with a check mark once a lesson has
+  hit its lifetime cap and a bell to mute one without disabling the rest. A
+  reset button at the bottom forgets everything and starts over.
+
+The widget and the service share one config entry, so the switches in the panel
+are the same settings described below.
 
 ## Configuration
 
@@ -124,8 +155,10 @@ How many times you have been taught each action is kept in
 
 ```
 plugin/
-  manifest.json        kind: service, id slw.omarkey
+  manifest.json        kinds: service + bar-widget, id slw.omarkey
   Service.qml          wiring: Hyprland events, file watches, notifications
+  OmarkeyPanel.qml     the bar widget and its popup
+  ShortcutRow.qml      one "action -> keystroke" line
   OmarkeyModel.js      all the logic, no QML imports, unit tested
 hypr/
   omarkey-shim.lua     the hl.bind wrapper
@@ -148,6 +181,14 @@ test/
 - **Deleting `state.json` needs a shell restart.** The running service holds the
   nag history in memory and only reads the file at startup, so removing it on
   disk alone will look like nothing happened.
+- **Do not name a plugin file after the type it extends.** A local `Panel.qml`
+  shadows `qs.Ui.Panel`, and the shell reports it as the memorable
+  "File name case mismatch". The entry point is `OmarkeyPanel.qml` for that
+  reason.
+- **A bar widget needs `implicitWidth`/`implicitHeight`.** Without them it
+  occupies a zero-width slot and renders nothing, with no error anywhere.
+- `omarchy plugin enable <id> <section>` will not move a plugin that is already
+  enabled. Disable it first, then enable it with the placement.
 - Omarchy 4 dispatches in Lua, so testing by hand means
   `hyprctl dispatch "hl.dsp.focus({ workspace = '5' })"`, not
   `hyprctl dispatch workspace 5`. The old syntax fails silently enough to waste

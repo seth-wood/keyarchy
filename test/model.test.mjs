@@ -127,3 +127,77 @@ test("merging config keeps untouched defaults", () => {
   assert.equal(config.categories.window, true)
   assert.equal(config.cooldownMs, Model.defaultConfig().cooldownMs)
 })
+
+test("summarises how much of your keymap you actually reach for", () => {
+  const binds = { "Close window": "SUPER + W", "Toggle scratchpad": "SUPER + S", "Full screen": "SUPER + F" }
+  assert.deepEqual(Model.usageSummary(binds, { "Close window": 4 }), { used: 1, total: 3 })
+  assert.deepEqual(Model.usageSummary(binds, {}), { used: 0, total: 3 })
+  assert.deepEqual(Model.usageSummary({}, {}), { used: 0, total: 0 })
+})
+
+test("lists never-triggered bindings in stable order", () => {
+  const binds = { "Close window": "SUPER + W", "Toggle scratchpad": "SUPER + S", "Full screen": "SUPER + F" }
+  const unused = Model.unusedBinds(binds, { "Close window": 1 })
+  assert.deepEqual(unused.map((b) => b.description), ["Full screen", "Toggle scratchpad"])
+})
+
+test("'show another' walks the list instead of repeating", () => {
+  const list = [{ description: "a" }, { description: "b" }, { description: "c" }]
+  assert.deepEqual(Model.sampleUnused(list, 0, 2).map((x) => x.description), ["a", "b"])
+  assert.deepEqual(Model.sampleUnused(list, 2, 2).map((x) => x.description), ["c", "a"])
+  assert.deepEqual(Model.sampleUnused([], 0, 3), [])
+  // Asking for more than exists must not repeat entries.
+  assert.equal(Model.sampleUnused(list, 0, 9).length, 3)
+})
+
+test("builds lesson rows newest first, marking graduated and muted ones", () => {
+  const config = Model.mergeConfig({ lifetimeCap: 3, muted: ["fullscreen"] })
+  const state = Model.emptyState()
+  const base = Date.now()
+
+  state.counts = { "close-window": 3, "fullscreen": 1 }
+  state.lastAt = { "close-window": base, "fullscreen": base + 100 }
+  state.meta = {
+    "close-window": { description: "Close window", keys: "SUPER + W" },
+    "fullscreen": { description: "Full screen", keys: "SUPER + F" }
+  }
+
+  const rows = Model.lessonRows(state, config)
+  assert.deepEqual(rows.map((r) => r.action), ["fullscreen", "close-window"])
+  assert.equal(rows[1].graduated, true)
+  assert.equal(rows[0].graduated, false)
+  assert.equal(rows[0].muted, true)
+  assert.equal(rows[1].keys, "SUPER + W")
+})
+
+test("a lesson row stays readable when metadata is missing", () => {
+  const state = Model.emptyState()
+  state.counts = { "workspace:5": 1, "close-window": 1, "launch:Browser": 1 }
+  state.lastAt = { "workspace:5": 3, "close-window": 2, "launch:Browser": 1 }
+  const rows = Model.lessonRows(state, Model.mergeConfig({}))
+  assert.deepEqual(rows.map((r) => r.description), ["Switch to workspace 5", "Close window", "Browser"])
+  assert.equal(rows[0].keys, "")
+})
+
+test("describeAction leaves an unknown action alone", () => {
+  assert.equal(Model.describeAction("something-new"), "something-new")
+  assert.equal(Model.describeAction(""), "")
+})
+
+test("recordNotified stores what the panel needs to render the row", () => {
+  const state = Model.emptyState()
+  Model.recordNotified("close-window", 5, state, { description: "Close window" }, "SUPER + W")
+  assert.deepEqual(state.meta["close-window"], { description: "Close window", keys: "SUPER + W" })
+  assert.equal(state.counts["close-window"], 1)
+})
+
+test("muting toggles both ways", () => {
+  assert.deepEqual(Model.toggleMuted([], "fullscreen"), ["fullscreen"])
+  assert.deepEqual(Model.toggleMuted(["fullscreen", "close-window"], "fullscreen"), ["close-window"])
+})
+
+test("parseCounts survives junk", () => {
+  assert.deepEqual(Model.parseCounts('{"a":1}'), { a: 1 })
+  assert.deepEqual(Model.parseCounts("nope"), {})
+  assert.deepEqual(Model.parseCounts(""), {})
+})

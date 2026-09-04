@@ -24,7 +24,7 @@ luac -p "$SRC/hypr/omarkey-shim.lua" || fail "shim has a Lua syntax error"
 # copy. Re-running overwrites it.
 rm -rf "$PLUGIN_DEST"
 mkdir -p "$PLUGIN_DEST"
-cp "$SRC/plugin/manifest.json" "$SRC/plugin/Service.qml" "$SRC/plugin/OmarkeyModel.js" "$PLUGIN_DEST/"
+cp "$SRC"/plugin/* "$PLUGIN_DEST/"
 
 cp "$SRC/hypr/omarkey-shim.lua" "$SHIM_DEST"
 

@@ -5,6 +5,19 @@
   "version": "0.1.0",
   "author": "slw",
   "description": "Teaches the keybinding for actions you performed with the mouse",
-  "kinds": ["service"],
-  "entryPoints": { "service": "Service.qml" }
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "OmarkeyPanel.qml"
+  },
+  "barWidget": {
+    "displayName": "Omarkey",
+    "description": "Keyboard-shortcut coach: toggle teaching, see which shortcuts you never use, and review what it has taught you.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
 }
