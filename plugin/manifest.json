@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "slw.omarkey",
+  "name": "Omarkey",
+  "version": "0.1.0",
+  "author": "slw",
+  "description": "Teaches the keybinding for actions you performed with the mouse",
+  "kinds": ["service"],
+  "entryPoints": { "service": "Service.qml" }
+}

@@ -1,0 +1,110 @@
+-- Mocks Hyprland's `hl` table and exercises the shim without touching the
+-- running compositor. Run: lua test/shim.test.lua
+--
+-- The shim wraps every keybind on the machine, so a bug here breaks the whole
+-- desktop. This runs before anything is installed.
+
+local failures = 0
+
+local function check(label, ok)
+  if ok then
+    print("ok   " .. label)
+  else
+    failures = failures + 1
+    print("FAIL " .. label)
+  end
+end
+
+local temp_dir = os.getenv("TMPDIR") or "/tmp"
+temp_dir = temp_dir .. "/omarkey-shim-test-" .. tostring(os.time())
+os.execute("mkdir -p '" .. temp_dir .. "'")
+os.getenv = (function(original)
+  return function(name)
+    if name == "XDG_RUNTIME_DIR" then return temp_dir end
+    return original(name)
+  end
+end)(os.getenv)
+
+local dispatched = {}
+local registered = {}
+
+_G.hl = {
+  dispatch = function(descriptor)
+    dispatched[#dispatched + 1] = descriptor
+    return "dispatched:" .. tostring(descriptor)
+  end,
+  bind = function(keys, dispatcher, opts)
+    registered[#registered + 1] = { keys = keys, dispatcher = dispatcher, opts = opts }
+    return "bind-handle:" .. tostring(keys)
+  end
+}
+
+local original_bind = _G.hl.bind
+package.path = os.getenv("HOME") .. "/.config/?.lua;" .. package.path
+dofile(os.getenv("HOME") .. "/Developer/omarkey/hypr/omarkey-shim.lua")
+
+check("wraps hl.bind", _G.hl.bind ~= original_bind)
+
+local handle = hl.bind("SUPER + code:12", "descriptor-workspace-3", { description = "Switch to workspace 3" })
+check("preserves hl.bind's return value (submaps collect it)", handle == "bind-handle:SUPER + code:12")
+
+hl.bind("SUPER + W", "descriptor-close", { description = "Close window" })
+hl.bind("SUPER + mouse:272", "descriptor-drag", { description = "Move window", mouse = true })
+hl.bind("SUPER + X", "descriptor-undescribed", {})
+
+local function read_file(path)
+  local file = io.open(path, "r")
+  if not file then return nil end
+  local contents = file:read("*a")
+  file:close()
+  return contents
+end
+
+local binds = read_file(temp_dir .. "/omarkey/binds.json")
+check("exports the real key string for a code:NN bind",
+  binds ~= nil and binds:find('"Switch to workspace 3":"SUPER %+ code:12"') ~= nil)
+check("exports plain binds", binds:find('"Close window":"SUPER %+ W"') ~= nil)
+check("leaves mouse binds out of the export", binds:find("Move window") == nil)
+check("leaves binds without a description out of the export", binds:find("SUPER %+ X") == nil)
+
+-- The mouse bind must reach hl.bind untouched, or drag-to-move breaks.
+local mouse_entry
+for _, entry in ipairs(registered) do
+  if entry.keys == "SUPER + mouse:272" then mouse_entry = entry end
+end
+check("passes mouse binds through unwrapped", mouse_entry ~= nil and mouse_entry.dispatcher == "descriptor-drag")
+
+-- Firing a wrapped bind must beacon and still dispatch the original.
+local close_entry
+for _, entry in ipairs(registered) do
+  if entry.keys == "SUPER + W" then close_entry = entry end
+end
+check("wraps a descriptor bind in a callable", type(close_entry.dispatcher) == "function")
+
+local result = close_entry.dispatcher()
+check("still dispatches the original descriptor", dispatched[#dispatched] == "descriptor-close")
+check("returns the dispatch result", result == "dispatched:descriptor-close")
+
+local beacon = read_file(temp_dir .. "/omarkey/last-bind")
+check("beacons the description and keys", beacon == "Close window\nSUPER + W")
+
+-- A Lua-function dispatcher must be called with its arguments intact.
+local received
+hl.bind("SUPER + Z", function(...) received = { ... } return "fn-result" end, { description = "Custom" })
+local custom_entry = registered[#registered]
+check("wrapping a function dispatcher preserves its return value", custom_entry.dispatcher(1, "two") == "fn-result")
+check("wrapping a function dispatcher preserves its arguments",
+  received ~= nil and received[1] == 1 and received[2] == "two")
+
+-- Reloading the config re-requires the shim; it must not wrap twice.
+local wrapped_bind = _G.hl.bind
+dofile(os.getenv("HOME") .. "/Developer/omarkey/hypr/omarkey-shim.lua")
+check("does not double-wrap on config reload", _G.hl.bind == wrapped_bind)
+
+os.execute("rm -rf '" .. temp_dir .. "'")
+
+if failures > 0 then
+  print(failures .. " failing")
+  os.exit(1)
+end
+print("all shim checks passed")
