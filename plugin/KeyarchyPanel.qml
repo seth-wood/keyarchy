@@ -4,24 +4,24 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
-import "OmarkeyModel.js" as Model
+import "KeyarchyModel.js" as Model
 
-// Omarkey's bar widget and its popup.
+// Keyarchy's bar widget and its popup.
 //
 // The service does the teaching; this is the window onto it. It reads the same
 // three files the service writes -- the shim's bind export, the lesson history,
 // and the usage counts -- and writes config back into shell.json the way every
 // other bar widget does.
 //
-// Left click opens the panel, right click toggles Omarkey off and on.
+// Left click opens the panel, right click toggles Keyarchy off and on.
 Panel {
   id: root
-  moduleName: "slw.omarkey"
-  ipcTarget: "slw.omarkey"
+  moduleName: "slw.keyarchy"
+  ipcTarget: "slw.keyarchy"
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
-  readonly property string stateDir: home + "/.local/state/omarkey"
+  readonly property string stateDir: home + "/.local/state/keyarchy"
 
   readonly property var config: Model.mergeConfig(settings)
   readonly property bool enabled: config.enabled
@@ -80,13 +80,13 @@ Panel {
   // The service watches this file, so clearing it takes effect immediately
   // rather than waiting for a shell restart.
   function resetProgress() {
-    stateFile.setText(JSON.stringify({ version: 2, counts: {}, lastAt: {}, meta: {} }, null, 2) + "\n")
+    stateFile.setText(JSON.stringify({ version: 2, counts: {}, lastAt: {}, meta: {}, lastAnyAt: 0 }, null, 2) + "\n")
     root.state = Model.emptyState()
   }
 
   FileView {
     id: bindsFile
-    path: root.runtimeDir + "/omarkey/binds.json"
+    path: root.runtimeDir + "/keyarchy/binds.json"
     watchChanges: true
     printErrors: false
     onLoaded: root.binds = Model.parseShimBinds(text())
@@ -115,6 +115,7 @@ Panel {
         if (parsed.counts) next.counts = parsed.counts
         if (parsed.lastAt) next.lastAt = parsed.lastAt
         if (parsed.meta) next.meta = parsed.meta
+        if (parsed.lastAnyAt) next.lastAnyAt = Number(parsed.lastAnyAt) || 0
       } catch (error) {
         // Nothing to show is the right answer for an unreadable history.
       }
@@ -133,7 +134,7 @@ Panel {
     bar: root.bar
     text: "󰌌"
     foreground: root.barIconColor
-    tooltipText: root.enabled ? "Omarkey — " + root.summaryText : "Omarkey — off"
+    tooltipText: root.enabled ? "Keyarchy — " + root.summaryText : "Keyarchy — off"
 
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) root.toggleEnabled()
@@ -179,7 +180,7 @@ Panel {
 
           PanelHero {
             width: parent.width
-            title: "Omarkey"
+            title: "Keyarchy"
             meta: root.enabled ? root.summaryText : "Off"
             foreground: root.foreground
             fontFamily: root.fontFamily
@@ -291,7 +292,7 @@ Panel {
             }
           }
 
-          // ---------------------------------------------------- taught you
+          // ---------------------------------------------------- learned
           PanelSeparator {
             width: parent.width
             foreground: root.foreground
@@ -304,7 +305,7 @@ Panel {
             visible: root.lessons.length > 0
 
             PanelSectionHeader {
-              text: "Taught you"
+              text: "Learned"
               foreground: root.foreground
               fontFamily: root.fontFamily
             }
@@ -315,7 +316,7 @@ Panel {
                 width: column.width
                 description: modelData.description
                 keys: modelData.keys
-                // A check mark means Omarkey has stopped bringing this one up.
+                // A check mark means Keyarchy has stopped bringing this one up.
                 trailing: modelData.graduated ? "󰄬" : "×" + modelData.count
                 faded: modelData.muted
                 actionIcon: modelData.muted ? "󰂛" : "󰂚"

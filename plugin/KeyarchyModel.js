@@ -1,4 +1,4 @@
-// Pure logic for Omarkey. No QML imports, so test/model.test.mjs can drive it
+// Pure logic for Keyarchy. No QML imports, so test/model.test.mjs can drive it
 // under node. Style follows the first-party *Model.js files in
 // $OMARCHY_PATH/shell/plugins/services/.
 
@@ -81,8 +81,14 @@ function mergeConfig(overrides) {
   if (!overrides || typeof overrides !== "object") return config
 
   for (var key in config) {
-    if (key === "categories") continue
+    if (key === "categories" || key === "muted") continue
     if (overrides[key] !== undefined && overrides[key] !== null) config[key] = overrides[key]
+  }
+
+  if (Array.isArray(overrides.muted)) {
+    var muted = []
+    for (var i = 0; i < overrides.muted.length; i++) muted.push(String(overrides.muted[i]))
+    config.muted = muted
   }
 
   if (overrides.categories && typeof overrides.categories === "object") {
@@ -198,7 +204,7 @@ function appDescriptionForClass(windowClass) {
 
 // Turn a Hyprland socket2 event into the action it represents and the
 // description of the bind that would have done the same thing. Returns null
-// for everything Omarkey has nothing to teach about.
+// for everything Keyarchy has nothing to teach about.
 function classify(name, data) {
   var fields = String(data === undefined || data === null ? "" : data).split(",")
 
@@ -230,6 +236,8 @@ function classify(name, data) {
       return { action: "fullscreen", category: "window", description: "Full screen" }
 
     case "changefloatingmode":
+      // 0 is leaving floating (back to tiling); only teach the float direction.
+      if (String(fields[1]) !== "1") return null
       return {
         action: "toggle-float",
         category: "window",
@@ -240,7 +248,8 @@ function classify(name, data) {
       return {
         action: "focus-window",
         category: "focus",
-        description: "Focus on left window",
+        // Honest label: the lesson collapses all four arrow binds into one hint.
+        description: "Focus another window",
         hint: "arrows"
       }
 
@@ -284,6 +293,28 @@ function focusHint(binds) {
 function keysForAction(match, binds) {
   if (match.hint === "arrows") return focusHint(binds)
   return binds[match.description] || null
+}
+
+// Did a recent keybind beacon mean this event came from the keyboard?
+// Timing covers near-synchronous events (workspace, close). Description
+// matching covers delayed ones (openwindow can land seconds after the bind).
+function beaconSuppresses(match, lastBeaconAt, lastBeaconDescription, entryAt, now, options) {
+  if (!lastBeaconAt) return false
+
+  var leadMs = options && options.beaconLeadMs != null ? options.beaconLeadMs : 150
+  var matchMs = options && options.beaconMatchMs != null ? options.beaconMatchMs : 5000
+
+  if (lastBeaconAt >= entryAt - leadMs) return true
+  if (now - lastBeaconAt > matchMs) return false
+
+  var beacon = String(lastBeaconDescription || "")
+  if (beacon === "") return false
+
+  if (match && match.hint === "arrows") {
+    return /^Focus on .+ window$/.test(beacon)
+  }
+
+  return beacon === String(match && match.description || "")
 }
 
 function categoryFor(action) {
@@ -439,6 +470,7 @@ if (typeof module !== "undefined") {
     classify: classify,
     focusHint: focusHint,
     keysForAction: keysForAction,
+    beaconSuppresses: beaconSuppresses,
     categoryFor: categoryFor,
     shouldNotify: shouldNotify,
     recordNotified: recordNotified,

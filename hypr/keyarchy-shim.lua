@@ -1,14 +1,14 @@
--- Omarkey shim.
+-- Keyarchy shim.
 --
 -- Wraps hl.bind so that:
---   1. Every keybind activation touches a beacon file. The Omarkey shell plugin
+--   1. Every keybind activation touches a beacon file. The Keyarchy shell plugin
 --      uses that as a positive "this came from the keyboard" signal, so it can
 --      stay quiet when you already used the shortcut.
 --   2. Every bind's real key string is exported to binds.json. This is better
 --      than `hyprctl binds -j`, which reports an empty key for the 59 `code:NN`
 --      binds -- including every workspace switch.
 --
--- Installed to ~/.config/hypr/omarkey-shim.lua and required from hyprland.lua
+-- Installed to ~/.config/hypr/keyarchy-shim.lua and required from hyprland.lua
 -- BEFORE require("default.hypr.omarchy"). Removing that require fully disables
 -- this file; the plugin then degrades to silence rather than misfiring.
 
@@ -19,15 +19,15 @@ if not runtime_dir or runtime_dir == "" then
   runtime_dir = "/tmp"
 end
 
-local state_dir = runtime_dir .. "/omarkey"
+local state_dir = runtime_dir .. "/keyarchy"
 local beacon_path = state_dir .. "/last-bind"
 local binds_path = state_dir .. "/binds.json"
 
 -- Requiring this module means Hyprland is (re)loading its config, so the bind
 -- registry starts over. It lives on _G because the wrapper installed on the
 -- first load keeps running across reloads, while this module table does not.
-_G.__omarkey_binds = {}
-_G.__omarkey_seen = {}
+_G.__keyarchy_binds = {}
+_G.__keyarchy_seen = {}
 
 local function write_file(path, contents)
   local file = io.open(path, "w")
@@ -47,7 +47,7 @@ end
 -- bind at config load and nothing at all while you use the desktop.
 local function flush_binds()
   local parts = {}
-  local binds = _G.__omarkey_binds
+  local binds = _G.__keyarchy_binds
   for index = 1, #binds do
     parts[#parts + 1] = "\"" .. json_escape(binds[index].description)
       .. "\":\"" .. json_escape(binds[index].keys) .. "\""
@@ -57,10 +57,10 @@ end
 
 local function record_bind(keys, description)
   if not keys or not description or description == "" then return end
-  if _G.__omarkey_seen[description] then return end
+  if _G.__keyarchy_seen[description] then return end
 
-  _G.__omarkey_seen[description] = true
-  local binds = _G.__omarkey_binds
+  _G.__keyarchy_seen[description] = true
+  local binds = _G.__keyarchy_binds
   binds[#binds + 1] = { keys = keys, description = description }
   flush_binds()
 end
@@ -78,10 +78,10 @@ local function is_mouse_bind(keys, opts)
 end
 
 function M.install()
-  if _G.__omarkey_installed then return end
+  if _G.__keyarchy_installed then return end
   if type(hl) ~= "table" or type(hl.bind) ~= "function" then return end
 
-  _G.__omarkey_installed = true
+  _G.__keyarchy_installed = true
   os.execute("mkdir -p '" .. state_dir .. "' 2>/dev/null")
 
   local original_bind = hl.bind

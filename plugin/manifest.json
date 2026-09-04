@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "slw.omarkey",
-  "name": "Omarkey",
+  "id": "slw.keyarchy",
+  "name": "Keyarchy",
   "version": "0.1.0",
   "author": "slw",
   "description": "Teaches the keybinding for actions you performed with the mouse",
@@ -11,10 +11,10 @@
   ],
   "entryPoints": {
     "service": "Service.qml",
-    "barWidget": "OmarkeyPanel.qml"
+    "barWidget": "KeyarchyPanel.qml"
   },
   "barWidget": {
-    "displayName": "Omarkey",
+    "displayName": "Keyarchy",
     "description": "Keyboard-shortcut coach: toggle teaching, see which shortcuts you never use, and review what it has taught you.",
     "category": "System",
     "allowMultiple": false,

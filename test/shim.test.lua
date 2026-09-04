@@ -16,7 +16,7 @@ local function check(label, ok)
 end
 
 local temp_dir = os.getenv("TMPDIR") or "/tmp"
-temp_dir = temp_dir .. "/omarkey-shim-test-" .. tostring(os.time())
+temp_dir = temp_dir .. "/keyarchy-shim-test-" .. tostring(os.time())
 os.execute("mkdir -p '" .. temp_dir .. "'")
 os.getenv = (function(original)
   return function(name)
@@ -41,7 +41,9 @@ _G.hl = {
 
 local original_bind = _G.hl.bind
 package.path = os.getenv("HOME") .. "/.config/?.lua;" .. package.path
-dofile(os.getenv("HOME") .. "/Developer/omarkey/hypr/omarkey-shim.lua")
+local here = debug.getinfo(1, "S").source:match("^@(.*/)") or "./"
+local shim_path = here .. "../hypr/keyarchy-shim.lua"
+dofile(shim_path)
 
 check("wraps hl.bind", _G.hl.bind ~= original_bind)
 
@@ -60,7 +62,7 @@ local function read_file(path)
   return contents
 end
 
-local binds = read_file(temp_dir .. "/omarkey/binds.json")
+local binds = read_file(temp_dir .. "/keyarchy/binds.json")
 check("exports the real key string for a code:NN bind",
   binds ~= nil and binds:find('"Switch to workspace 3":"SUPER %+ code:12"') ~= nil)
 check("exports plain binds", binds:find('"Close window":"SUPER %+ W"') ~= nil)
@@ -85,7 +87,7 @@ local result = close_entry.dispatcher()
 check("still dispatches the original descriptor", dispatched[#dispatched] == "descriptor-close")
 check("returns the dispatch result", result == "dispatched:descriptor-close")
 
-local beacon = read_file(temp_dir .. "/omarkey/last-bind")
+local beacon = read_file(temp_dir .. "/keyarchy/last-bind")
 check("beacons the description and keys", beacon == "Close window\nSUPER + W")
 
 -- A Lua-function dispatcher must be called with its arguments intact.
@@ -98,7 +100,7 @@ check("wrapping a function dispatcher preserves its arguments",
 
 -- Reloading the config re-requires the shim; it must not wrap twice.
 local wrapped_bind = _G.hl.bind
-dofile(os.getenv("HOME") .. "/Developer/omarkey/hypr/omarkey-shim.lua")
+dofile(shim_path)
 check("does not double-wrap on config reload", _G.hl.bind == wrapped_bind)
 
 os.execute("rm -rf '" .. temp_dir .. "'")

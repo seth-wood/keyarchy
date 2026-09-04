@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { createRequire } from "node:module"
 
 const require = createRequire(import.meta.url)
-const Model = require("../plugin/OmarkeyModel.js")
+const Model = require("../plugin/KeyarchyModel.js")
 
 test("renders code:NN binds as the digit they produce", () => {
   assert.equal(Model.formatKeyString("SUPER + code:12"), "SUPER + 3")
@@ -48,10 +48,12 @@ test("classifies the teachable Hyprland events", () => {
   assert.equal(Model.classify("closewindow", "0x55").description, "Close window")
   assert.equal(Model.classify("changefloatingmode", "0x55,1").description, "Toggle window floating/tiling")
   assert.equal(Model.classify("openwindow", "0x55,3,Alacritty,zsh").description, "Terminal")
+  assert.equal(Model.classify("activewindowv2", "0x55").description, "Focus another window")
 })
 
 test("stays quiet for events with nothing to teach", () => {
   assert.equal(Model.classify("fullscreen", "0"), null)
+  assert.equal(Model.classify("changefloatingmode", "0x55,0"), null)
   assert.equal(Model.classify("openwindow", "0x55,3,SomeUnboundApp,x"), null)
   assert.equal(Model.classify("monitoradded", "DP-1"), null)
   assert.equal(Model.classify("workspacev2", ""), null)
@@ -68,6 +70,27 @@ test("collapses the four directional focus binds into one hint", () => {
   // One missing direction means no honest hint to give.
   delete binds["Focus on above window"]
   assert.equal(Model.focusHint(binds), null)
+})
+
+test("suppresses delayed openwindow when the beacon named that launch", () => {
+  const match = { description: "Browser", category: "launch", action: "launch:Browser" }
+  // Beacon at t=0, window maps 2s later — outside the lead window, inside match window.
+  assert.equal(Model.beaconSuppresses(match, 1000, "Browser", 3000, 3250, {}), true)
+  assert.equal(Model.beaconSuppresses(match, 1000, "Terminal", 3000, 3250, {}), false)
+  assert.equal(Model.beaconSuppresses(match, 1000, "Browser", 3000, 8000, {}), false)
+})
+
+test("suppresses near-synchronous events by beacon timing alone", () => {
+  const match = { description: "Close window", action: "close-window" }
+  assert.equal(Model.beaconSuppresses(match, 1000, "Close window", 1050, 1300, {}), true)
+  // Beacon long before the event and for a different action: do not suppress.
+  assert.equal(Model.beaconSuppresses(match, 1000, "Full screen", 3000, 3250, {}), false)
+})
+
+test("suppresses directional focus beacons against the collapsed focus lesson", () => {
+  const match = { description: "Focus another window", hint: "arrows", action: "focus-window" }
+  assert.equal(Model.beaconSuppresses(match, 1000, "Focus on left window", 2000, 2250, {}), true)
+  assert.equal(Model.beaconSuppresses(match, 1000, "Close window", 2000, 2250, {}), false)
 })
 
 test("rate limits repeats of the same action", () => {
@@ -126,6 +149,12 @@ test("merging config keeps untouched defaults", () => {
   assert.equal(config.categories.launch, false)
   assert.equal(config.categories.window, true)
   assert.equal(config.cooldownMs, Model.defaultConfig().cooldownMs)
+})
+
+test("merging config ignores a non-array muted value", () => {
+  const config = Model.mergeConfig({ muted: "close-window" })
+  assert.deepEqual(config.muted, [])
+  assert.deepEqual(Model.mergeConfig({ muted: ["close-window"] }).muted, ["close-window"])
 })
 
 test("summarises how much of your keymap you actually reach for", () => {

@@ -3,7 +3,7 @@ import qs.Commons
 import qs.Ui
 
 // One "action → keystroke" line. Used for both halves of the panel: the
-// shortcuts you have never pressed, and the lessons Omarkey has given you.
+// shortcuts you have never pressed, and the lessons Keyarchy has given you.
 //
 // The keystroke is the point of the row, so it gets the trailing edge where
 // the eye lands, and the description truncates before it does.

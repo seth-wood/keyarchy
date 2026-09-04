@@ -2,11 +2,11 @@ import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
-import "OmarkeyModel.js" as Model
+import "KeyarchyModel.js" as Model
 
-// Omarkey: teaches the keybinding for an action you just did with the mouse.
+// Keyarchy: teaches the keybinding for an action you just did with the mouse.
 //
-// The Lua shim in ~/.config/hypr/omarkey-shim.lua touches a beacon file every
+// The Lua shim in ~/.config/hypr/keyarchy-shim.lua touches a beacon file every
 // time a keybind fires. Any Hyprland event that arrives without a beacon
 // alongside it came from somewhere else -- a bar click, the menu, a titlebar --
 // and is worth a lesson. Without the shim no beacon ever appears, so this
@@ -20,13 +20,13 @@ Item {
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
-  readonly property string stateDir: home + "/.local/state/omarkey"
+  readonly property string stateDir: home + "/.local/state/keyarchy"
   readonly property string statePath: stateDir + "/state.json"
   readonly property string usagePath: stateDir + "/usage.json"
-  readonly property string beaconPath: runtimeDir + "/omarkey/last-bind"
-  readonly property string bindsPath: runtimeDir + "/omarkey/binds.json"
+  readonly property string beaconPath: runtimeDir + "/keyarchy/last-bind"
+  readonly property string bindsPath: runtimeDir + "/keyarchy/binds.json"
 
-  readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "slw.omarkey"
+  readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "slw.keyarchy"
 
   // Config rides along in this plugin's shell.json entry. The bar widget and
   // the service share it, so this mirrors the precedence shell.qml's
@@ -60,6 +60,8 @@ Item {
   property var binds: ({})
   property var state: Model.emptyState()
   property real lastBeaconAt: 0
+  property string lastBeaconDescription: ""
+  property bool countNextBeacon: false
   property var pending: []
 
   // Which bindings you actually press, counted by description. The beacon
@@ -70,8 +72,10 @@ Item {
 
   // A keybind's beacon write and its Hyprland event race each other, so hold
   // judgment briefly and accept a beacon from either side of the event.
+  // Description matching covers delayed events (app windows mapping late).
   readonly property int verdictDelayMs: 250
   readonly property int beaconLeadMs: 150
+  readonly property int beaconMatchMs: 5000
 
   function loadBinds(text) {
     var parsed = Model.parseShimBinds(text)
@@ -87,10 +91,15 @@ Item {
     root.usage = Model.parseCounts(text)
   }
 
-  // The beacon file names the bind that just fired. Reading it is what makes
-  // "shortcuts you have never used" possible.
-  function countUsage(text) {
+  // Remember what the keyboard just claimed, for suppression. Counting usage
+  // is separate so a shell restart does not re-tally the leftover beacon file.
+  function noteBeacon(text) {
     var description = String(text || "").split("\n")[0]
+    root.lastBeaconDescription = description
+    return description
+  }
+
+  function countUsage(description) {
     if (description === "") return
 
     var next = ({})
@@ -117,6 +126,7 @@ Item {
       if (parsed.counts) next.counts = parsed.counts
       if (parsed.lastAt) next.lastAt = parsed.lastAt
       if (parsed.meta) next.meta = parsed.meta
+      if (parsed.lastAnyAt) next.lastAnyAt = Number(parsed.lastAnyAt) || 0
     } catch (error) {
       // A corrupt state file only costs us the nag history; start over.
     }
@@ -128,7 +138,8 @@ Item {
       version: 2,
       counts: root.state.counts,
       lastAt: root.state.lastAt,
-      meta: root.state.meta
+      meta: root.state.meta,
+      lastAnyAt: root.state.lastAnyAt || 0
     }, null, 2) + "\n")
   }
 
@@ -146,6 +157,7 @@ Item {
   function settleVerdicts() {
     var now = Date.now()
     var remaining = []
+    var beaconOpts = { beaconLeadMs: root.beaconLeadMs, beaconMatchMs: root.beaconMatchMs }
 
     for (var i = 0; i < root.pending.length; i++) {
       var entry = root.pending[i]
@@ -153,8 +165,11 @@ Item {
         remaining.push(entry)
         continue
       }
-      // A beacon this close means the keyboard already did it.
-      if (root.lastBeaconAt >= entry.at - root.beaconLeadMs) continue
+      // A recent beacon for this action means the keyboard already did it.
+      if (Model.beaconSuppresses(
+        entry.match, root.lastBeaconAt, root.lastBeaconDescription,
+        entry.at, now, beaconOpts
+      )) continue
 
       teach(entry.match, now)
     }
@@ -169,7 +184,7 @@ Item {
     var keys = Model.keysForAction(match, root.binds)
     if (!keys) return
 
-    console.log("omarkey teach " + match.action + " -> " + keys)
+    console.log("keyarchy teach " + match.action + " -> " + keys)
 
     notifyProcess.command = [
       "omarchy-notification-send",
@@ -210,9 +225,18 @@ Item {
     onFileChanged: {
       // Timestamp first: suppression must not wait on the async read.
       root.lastBeaconAt = Date.now()
+      root.countNextBeacon = true
       reload()
     }
-    onLoaded: root.countUsage(text())
+    onLoaded: {
+      var description = root.noteBeacon(text())
+      // Only tally activations that triggered a watch event — not the leftover
+      // file read on service start.
+      if (root.countNextBeacon) {
+        root.countNextBeacon = false
+        root.countUsage(description)
+      }
+    }
   }
 
   FileView {
@@ -289,6 +313,6 @@ Item {
     stateFile.reload()
     usageFile.reload()
     refreshBinds()
-    console.log("omarkey service-ready id=" + root.pluginId + " hyprland=" + connected)
+    console.log("keyarchy service-ready id=" + root.pluginId + " hyprland=" + connected)
   }
 }

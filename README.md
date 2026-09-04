@@ -1,4 +1,4 @@
-# Omarkey
+# Keyarchy
 
 An Omarchy shell plugin that teaches you the keyboard shortcut for something you
 just did with the mouse.
@@ -17,13 +17,13 @@ Built for Omarchy 4.0.0.alpha / Hyprland 0.56.
 ## Install
 
 ```bash
-git clone <this repo> ~/Developer/omarkey
-cd ~/Developer/omarkey
+git clone <this repo> ~/Developer/keyarchy
+cd ~/Developer/keyarchy
 ./install.sh
 ```
 
-That copies the plugin to `~/.config/omarchy/plugins/slw.omarkey/`, the Lua shim
-to `~/.config/hypr/omarkey-shim.lua`, adds one `require` line to
+That copies the plugin to `~/.config/omarchy/plugins/slw.keyarchy/`, the Lua shim
+to `~/.config/hypr/keyarchy-shim.lua`, adds one `require` line to
 `~/.config/hypr/hyprland.lua` (backing the file up first), and reloads Hyprland.
 
 `./uninstall.sh` reverses all of it.
@@ -41,7 +41,7 @@ bar. Hyprland 0.56 logs nothing on keybind dispatch, and reading `/dev/input`
 directly would mean joining the `input` group — which lets every process you run
 read every key you type. Not worth it for a hint popup.
 
-So Omarkey gets the signal from the other end. Omarchy defines all its bindings
+So Keyarchy gets the signal from the other end. Omarchy defines all its bindings
 in Lua through `hl.bind`, so the shim wraps that function:
 
 ```
@@ -66,7 +66,7 @@ rather than firing on every keystroke. That is the intended failure mode.
 `hyprctl binds -j` reports `key: ""` and `keycode: 0` for the 59 bindings
 Omarchy defines by keycode — which includes *every workspace shortcut*, the
 ones most worth teaching. The shim sees the real `"SUPER + code:12"` string at
-config time and writes `$XDG_RUNTIME_DIR/omarkey/binds.json`, so Omarkey can
+config time and writes `$XDG_RUNTIME_DIR/keyarchy/binds.json`, so Keyarchy can
 render `SUPER + 3`.
 
 Bindings are matched by their **description**, never by dispatcher. Rebind
@@ -99,10 +99,10 @@ events and need separate detection.
 `./install.sh` installs it; put it on the bar with:
 
 ```bash
-omarchy plugin enable slw.omarkey right
+omarchy plugin enable slw.keyarchy right
 ```
 
-**Left click** opens the panel, **right click** toggles Omarkey off and on.
+**Left click** opens the panel, **right click** toggles Keyarchy off and on.
 
 The panel shows four things:
 
@@ -111,7 +111,7 @@ The panel shows four things:
   activations by description; nothing extra is needed to know what you press.
 - **Shortcuts you have never once used**, three at a time, with a button (or
   `n`) to walk through the rest. This is the half of the problem notifications
-  can't reach: Omarkey can only teach you a shortcut for something you did, and
+  can't reach: Keyarchy can only teach you a shortcut for something you did, and
   most of the 212 are for things you have never thought to do.
 - **Teaching switches** for the four categories, including the focus category
   that is otherwise off in a config file you'd have to know about.
@@ -124,14 +124,14 @@ are the same settings described below.
 
 ## Configuration
 
-Omarkey reads its own entry in `~/.config/omarchy/shell.json`, the same way bar
+Keyarchy reads its own entry in `~/.config/omarchy/shell.json`, the same way bar
 widgets do. Hot-reloads on save.
 
 ```jsonc
 {
   "plugins": [
     {
-      "id": "slw.omarkey",
+      "id": "slw.keyarchy",
       "enabled": true,
       "cooldownMs": 300000,   // don't repeat one lesson inside 5 minutes
       "globalGapMs": 5000,    // never two notifications inside 5 seconds
@@ -149,19 +149,19 @@ widgets do. Hot-reloads on save.
 ```
 
 How many times you have been taught each action is kept in
-`~/.local/state/omarkey/state.json`. Delete it to start the lessons over.
+`~/.local/state/keyarchy/state.json`. Delete it to start the lessons over.
 
 ## Layout
 
 ```
 plugin/
-  manifest.json        kinds: service + bar-widget, id slw.omarkey
+  manifest.json        kinds: service + bar-widget, id slw.keyarchy
   Service.qml          wiring: Hyprland events, file watches, notifications
-  OmarkeyPanel.qml     the bar widget and its popup
+  KeyarchyPanel.qml     the bar widget and its popup
   ShortcutRow.qml      one "action -> keystroke" line
-  OmarkeyModel.js      all the logic, no QML imports, unit tested
+  KeyarchyModel.js      all the logic, no QML imports, unit tested
 hypr/
-  omarkey-shim.lua     the hl.bind wrapper
+  keyarchy-shim.lua     the hl.bind wrapper
 test/
   model.test.mjs       node --test test/model.test.mjs
   shim.test.lua        lua test/shim.test.lua -- mocks hl, no compositor needed
@@ -173,7 +173,7 @@ test/
   `Connections { target: Hyprland }` in a headless service never fires, because
   declaring the connection does not count as using the singleton. `Service.qml`
   touches `Hyprland.workspaces` at startup to force the connection. Remove that
-  line and Omarkey goes silent with no error.
+  line and Keyarchy goes silent with no error.
 - **Editing the repo does not update the installed plugin.** Re-run
   `./install.sh`, or copy the file, then `omarchy restart shell` — a service
   plugin is mounted at shell startup, so `omarchy plugin enable` mid-session is
@@ -183,7 +183,7 @@ test/
   disk alone will look like nothing happened.
 - **Do not name a plugin file after the type it extends.** A local `Panel.qml`
   shadows `qs.Ui.Panel`, and the shell reports it as the memorable
-  "File name case mismatch". The entry point is `OmarkeyPanel.qml` for that
+  "File name case mismatch". The entry point is `KeyarchyPanel.qml` for that
   reason.
 - **A bar widget needs `implicitWidth`/`implicitHeight`.** Without them it
   occupies a zero-width slot and renders nothing, with no error anywhere.
@@ -202,7 +202,7 @@ test/
   mouse binds left alone, no double-wrapping on reload. Run it before installing
   any change to the shim.
 - `hl.bind` and `hl.dsp` are Omarchy 4 **alpha** internals. If an update changes
-  them, the shim stops beaconing and Omarkey goes quiet. It should not break
+  them, the shim stops beaconing and Keyarchy goes quiet. It should not break
   Hyprland — the shim no-ops when `hl.bind` is missing — but check after an
   update.
 - Mouse bindings (`SUPER` + drag) are deliberately not wrapped; a Lua callback
