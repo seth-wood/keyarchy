@@ -456,6 +456,64 @@ function notificationBody(description, keys) {
   return description + "  →  " + keys
 }
 
+// Windowrules that force fullscreen without a user gesture. Mirrored from
+// Omarchy's shipped apps/*.lua so Keyarchy does not teach SUPER + F for them.
+var DEFAULT_COMPOSITOR_FULLSCREEN_RULES = [
+  { className: "org.omarchy.screensaver" },
+  { className: "com.moonlight_stream.Moonlight" },
+  { className: "com.libretro.RetroArch" },
+  { classRegex: ".*[Rr]esolve.*", titleRegex: "^DaVinci Resolve( Studio)? - .+$" }
+]
+
+function emptyFocus() {
+  return { className: "", title: "" }
+}
+
+function parseActiveWindow(data) {
+  var text = String(data === undefined || data === null ? "" : data)
+  var comma = text.indexOf(",")
+  if (comma === -1) return { className: text, title: "" }
+  return { className: text.slice(0, comma), title: text.slice(comma + 1) }
+}
+
+function noteFocus(focus, name, data) {
+  if (String(name || "") !== "activewindow") {
+    return focus && typeof focus === "object" ? focus : emptyFocus()
+  }
+  return parseActiveWindow(data)
+}
+
+function ruleMatchesFocus(rule, focus) {
+  if (!rule || !focus) return false
+  var className = String(focus.className || "")
+  if (className === "") return false
+
+  var classOk = false
+  if (rule.classRegex) {
+    classOk = new RegExp(rule.classRegex, "i").test(className)
+  } else {
+    classOk = className.toLowerCase() === String(rule.className || "").toLowerCase()
+  }
+  if (!classOk) return false
+
+  if (rule.titleRegex) {
+    return new RegExp(rule.titleRegex).test(String(focus.title || ""))
+  }
+  return true
+}
+
+function compositorOwnsFullscreen(focus) {
+  for (var i = 0; i < DEFAULT_COMPOSITOR_FULLSCREEN_RULES.length; i++) {
+    if (ruleMatchesFocus(DEFAULT_COMPOSITOR_FULLSCREEN_RULES[i], focus)) return true
+  }
+  return false
+}
+
+function compositorOwnsAction(match, focus) {
+  if (!match || String(match.action || "") !== "fullscreen") return false
+  return compositorOwnsFullscreen(focus)
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     defaultConfig: defaultConfig,
@@ -481,6 +539,12 @@ if (typeof module !== "undefined") {
     describeAction: describeAction,
     lessonRows: lessonRows,
     toggleMuted: toggleMuted,
-    notificationBody: notificationBody
+    notificationBody: notificationBody,
+    emptyFocus: emptyFocus,
+    parseActiveWindow: parseActiveWindow,
+    noteFocus: noteFocus,
+    ruleMatchesFocus: ruleMatchesFocus,
+    compositorOwnsFullscreen: compositorOwnsFullscreen,
+    compositorOwnsAction: compositorOwnsAction
   }
 }

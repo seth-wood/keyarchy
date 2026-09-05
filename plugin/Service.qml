@@ -70,6 +70,11 @@ Item {
   property var usage: ({})
   property bool usageDirty: false
 
+  // Last activewindow class/title. fullscreen>>1 carries no address, so this
+  // is how we recognize compositor windowrules (screensaver, etc.).
+  // Named focusIdentity: Item.focus is FINAL and cannot be overridden.
+  property var focusIdentity: ({ className: "", title: "" })
+
   // A keybind's beacon write and its Hyprland event race each other, so hold
   // judgment briefly and accept a beacon from either side of the event.
   // Description matching covers delayed events (app windows mapping late).
@@ -144,9 +149,12 @@ Item {
   }
 
   function onHyprlandEvent(name, data) {
+    root.focusIdentity = Model.noteFocus(root.focusIdentity, name, data)
+
     var match = Model.classify(name, data)
     if (!match) return
     if (root.settings.categories[match.category] === false) return
+    if (Model.compositorOwnsAction(match, root.focusIdentity)) return
 
     var queue = root.pending.slice()
     queue.push({ match: match, at: Date.now() })
