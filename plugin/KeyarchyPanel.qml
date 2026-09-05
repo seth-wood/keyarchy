@@ -132,9 +132,16 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "󰌌"
+    text: ""
     foreground: root.barIconColor
     tooltipText: root.enabled ? "Keyarchy — " + root.summaryText : "Keyarchy — off"
+    iconComponent: Component {
+      KeyarchyMark {
+        width: Style.bar.iconCanvas
+        height: Style.bar.iconCanvas
+        foreground: root.barIconColor
+      }
+    }
 
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) root.toggleEnabled()
@@ -187,11 +194,10 @@ Panel {
             iconOpacity: root.enabled ? 1.0 : 0.5
 
             iconComponent: Component {
-              Text {
-                text: "󰌌"
-                color: root.enabled ? root.foreground : root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.display
+              KeyarchyMark {
+                width: Style.font.display
+                height: Style.font.display
+                foreground: root.enabled ? root.foreground : root.dim
               }
             }
 

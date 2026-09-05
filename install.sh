@@ -61,7 +61,7 @@ fi
 # copy. Re-running overwrites it.
 rm -rf "$PLUGIN_DEST"
 mkdir -p "$PLUGIN_DEST"
-cp "$SRC"/plugin/* "$PLUGIN_DEST/"
+cp -a "$SRC"/plugin/. "$PLUGIN_DEST/"
 
 cp "$SRC/hypr/keyarchy-shim.lua" "$SHIM_DEST"
 
