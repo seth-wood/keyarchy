@@ -132,14 +132,14 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: ""
-    foreground: root.barIconColor
     tooltipText: root.enabled ? "Keyarchy — " + root.summaryText : "Keyarchy — off"
     iconComponent: Component {
-      KeyarchyMark {
-        width: Style.bar.iconCanvas
-        height: Style.bar.iconCanvas
-        foreground: root.barIconColor
+      Item {
+        KeyarchyMark {
+          anchors.centerIn: parent
+          iconSize: Style.space(12)
+          color: root.barIconColor
+        }
       }
     }
 
@@ -195,9 +195,8 @@ Panel {
 
             iconComponent: Component {
               KeyarchyMark {
-                width: Style.font.display
-                height: Style.font.display
-                foreground: root.enabled ? root.foreground : root.dim
+                iconSize: Style.font.display
+                color: root.enabled ? root.foreground : root.dim
               }
             }
 

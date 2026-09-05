@@ -164,7 +164,6 @@ KeyarchyPanel.qml      the bar widget and its popup
 KeyarchyMark.qml       the mark drawn on the bar
 ShortcutRow.qml        one "action -> keystroke" line
 KeyarchyModel.js       all the logic, no QML imports, unit tested
-assets/mark.svg
 hypr/
   keyarchy-shim.lua    the hl.bind wrapper
 test/
