@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "Seth Wood",
   "license": "MIT",
-  "description": "Teaches the keybinding for actions you performed with the mouse",
+  "description": "Learn Omarchy's keybindings as you work: teaches the shortcut for what you just did with the mouse",
   "kinds": [
     "service",
     "bar-widget"
@@ -16,7 +16,7 @@
   },
   "barWidget": {
     "displayName": "Keyarchy",
-    "description": "Keyboard-shortcut coach: toggle teaching, see which shortcuts you never use, and review what it has taught you.",
+    "description": "Track how much of Omarchy's keymap you actually use, browse the shortcuts you have never tried, and review what Keyarchy has taught you.",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right"

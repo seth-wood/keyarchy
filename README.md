@@ -1,15 +1,18 @@
 # Keyarchy
 
-Learn the keyboard by using the mouse.
+Learn Omarchy's keybindings without reading the list.
 
 ![Omarchy 4](https://img.shields.io/badge/Omarchy-4%20(Quattro)-1a1a1a)
 ![Hyprland 0.56](https://img.shields.io/badge/Hyprland-0.56-1a1a1a)
 ![Quickshell plugin](https://img.shields.io/badge/omarchy--shell-service%20%2B%20bar%20widget-1a1a1a)
 [![license: MIT](https://img.shields.io/badge/license-MIT-1a1a1a)](LICENSE)
 
-Keyarchy notices when you did something with the mouse that has a keybinding —
-clicked a workspace pill, closed a window, dragged something to another
-workspace — and tells you the keystroke you could have pressed instead.
+Omarchy ships more than 200 keyboard shortcuts. You will learn a dozen from the
+manual and keep clicking for the rest, because a cheatsheet can only tell you a
+binding exists — it can't tell you when you needed it.
+
+Keyarchy can. It watches for the moment you reach for the mouse to do something
+the keyboard already does, and teaches you that one shortcut, right then.
 
 ![Keyarchy teaching a workspace shortcut](preview.png)
 
@@ -17,7 +20,9 @@ Click workspace 5 in the bar and you get:
 
 ![Switch to workspace 5 — SUPER + 5](docs/notification-closeup.png)
 
-Press `SUPER + 5` and you get nothing, because you already knew.
+Press `SUPER + 5` next time and Keyarchy says nothing. It only teaches what you
+have not learned yet — five reminders per action, then it assumes you have it
+and goes quiet for good.
 
 ## Requirements
 
@@ -54,6 +59,9 @@ lesson history is left at `~/.local/state/keyarchy/`.
 
 ## What it teaches
 
+The everyday bindings — the ones worth having in your hands, and the ones you
+are most likely to do with the mouse instead:
+
 | You did | It suggests |
 |---|---|
 | Switched workspace | `Switch to workspace N` |
@@ -78,8 +86,10 @@ events and need separate detection.
 
 <img src="docs/panel.png" alt="The Keyarchy panel" width="380" align="right">
 
-Notifications can only teach you a shortcut for something you already did. The
-panel covers the other half — the shortcuts you have never once thought to use.
+Notifications can only teach you a shortcut for something you already did — and
+most of Omarchy's keymap is for things you have never thought to do. The panel
+is the other half of learning it: what you have covered, and what is still
+sitting there unused.
 
 - **How much of your keymap you actually reach for.** "27 of 212 shortcuts
   used". The shim's beacon names the binding that fired, so the service counts
@@ -88,9 +98,9 @@ panel covers the other half — the shortcuts you have never once thought to use
   walk through the rest.
 - **Teaching switches** for the four categories, including the focus category
   that is otherwise off in a config file you would have to know about.
-- **What it has taught you**, newest first, with a check mark once a lesson has
-  hit its lifetime cap and a bell to mute one without disabling the rest. A
-  reset button at the bottom forgets everything and starts over.
+- **What it has taught you**, newest first, with a check mark on the ones it has
+  stopped teaching and a bell to mute one without disabling the rest. A reset
+  button at the bottom forgets everything and starts the lessons over.
 
 **Left click** opens the panel. **Right click** toggles Keyarchy off and on.
 
