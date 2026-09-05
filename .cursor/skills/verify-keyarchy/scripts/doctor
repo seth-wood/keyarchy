@@ -17,7 +17,7 @@ command -v omarchy-shell >/dev/null || bad "omarchy-shell not on PATH"
 [[ -d $PLUGIN_DEST ]] || bad "plugin missing at $PLUGIN_DEST (run ./install.sh)"
 [[ -f $SHIM_DEST ]] || bad "shim missing at $SHIM_DEST"
 [[ -f $BINDS_PATH ]] || bad "binds.json missing at $BINDS_PATH (shim not exporting)"
-[[ -f $REPO_ROOT/plugin/manifest.json ]] || bad "repo manifest missing at $REPO_ROOT"
+[[ -f $REPO_ROOT/manifest.json ]] || bad "repo manifest missing at $REPO_ROOT"
 
 if command -v omarchy >/dev/null; then
   if omarchy plugin list --json 2>/dev/null | python3 -c "
@@ -41,8 +41,14 @@ fi
 bind_count=$(python3 -c "import json; print(len(json.load(open('$BINDS_PATH'))))" 2>/dev/null || echo 0)
 [[ "$bind_count" -gt 50 ]] && pass "binds.json has $bind_count entries" || bad "binds.json only has $bind_count entries"
 
-if ! diff -qr "$REPO_ROOT/plugin" "$PLUGIN_DEST" >/dev/null 2>&1; then
-  bad "installed plugin differs from $REPO_ROOT/plugin — re-run ./install.sh"
+# The repo root is the plugin folder now, so compare the tracked files rather
+# than the whole tree — the checkout also carries .git and untracked scratch.
+drift=""
+while IFS= read -r -d '' f; do
+  diff -q "$REPO_ROOT/$f" "$PLUGIN_DEST/$f" >/dev/null 2>&1 || drift="$f"
+done < <(git -C "$REPO_ROOT" ls-files -z ':!.cursor')
+if [[ -n $drift ]]; then
+  bad "installed plugin differs from repo (first: $drift) — re-run ./install.sh"
 else
   pass "installed plugin matches repo"
 fi

@@ -3,7 +3,8 @@
   "id": "slw.keyarchy",
   "name": "Keyarchy",
   "version": "0.1.0",
-  "author": "slw",
+  "author": "Seth Wood",
+  "license": "MIT",
   "description": "Teaches the keybinding for actions you performed with the mouse",
   "kinds": [
     "service",

@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { createRequire } from "node:module"
 
 const require = createRequire(import.meta.url)
-const Model = require("../plugin/KeyarchyModel.js")
+const Model = require("../KeyarchyModel.js")
 
 test("renders code:NN binds as the digit they produce", () => {
   assert.equal(Model.formatKeyString("SUPER + code:12"), "SUPER + 3")

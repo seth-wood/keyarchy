@@ -1,10 +1,24 @@
 #!/bin/bash
-# Remove Keyarchy and put hyprland.lua back the way it was.
+# Remove Keyarchy and put hyprland.lua back the way it was. Works from a clone
+# or from the installed plugin folder (where `omarchy plugin add` puts it).
 
 set -euo pipefail
 
 PLUGIN_ID="slw.keyarchy"
 PLUGIN_DEST="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+
+# Installed via `omarchy plugin add`, this script lives inside the folder it is
+# about to delete, and bash reads a script as it runs. Re-exec from a copy.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+if [[ ${KEYARCHY_UNINSTALL_RELOCATED:-} != 1 && $SELF == "$PLUGIN_DEST"/* ]]; then
+  relocated="$(mktemp)"
+  cp "$SELF" "$relocated"
+  chmod +x "$relocated"
+  status=0
+  KEYARCHY_UNINSTALL_RELOCATED=1 "$relocated" "$@" || status=$?
+  rm -f "$relocated"
+  exit $status
+fi
 SHIM_DEST="$HOME/.config/hypr/keyarchy-shim.lua"
 HYPRLAND_LUA="$HOME/.config/hypr/hyprland.lua"
 

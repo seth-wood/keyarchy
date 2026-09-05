@@ -1,17 +1,17 @@
 #!/bin/bash
-# Install Keyarchy: the shell plugin, the Hyprland shim, and the one line in
-# hyprland.lua that loads the shim. Safe to re-run. Migrates a leftover
-# Omarkey install if one is still around.
+# Install Keyarchy from a clone, the way `omarchy plugin add` would: copy the
+# tracked files into the plugin folder, install the Hyprland shim, enable the
+# plugin. Use this when hacking on the repo; users installing from GitHub can
+# `omarchy plugin add` instead (see README).
+#
+# Safe to re-run. Migrates a leftover Omarkey install if one is still around.
 
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ID="slw.keyarchy"
 PLUGIN_DEST="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
-SHIM_DEST="$HOME/.config/hypr/keyarchy-shim.lua"
 HYPRLAND_LUA="$HOME/.config/hypr/hyprland.lua"
-SHIM_LINE='require("hypr.keyarchy-shim") -- keyarchy'
-ANCHOR='require("default.hypr.omarchy")'
 OLD_PLUGIN_ID="slw.omarkey"
 OLD_PLUGIN_DEST="$HOME/.config/omarchy/plugins/$OLD_PLUGIN_ID"
 OLD_SHIM_DEST="$HOME/.config/hypr/omarkey-shim.lua"
@@ -24,8 +24,7 @@ fail() { echo "keyarchy: $*" >&2; exit 1; }
 command -v omarchy >/dev/null || fail "omarchy not found on PATH"
 [[ -f $HYPRLAND_LUA ]] || fail "missing $HYPRLAND_LUA"
 
-omarchy plugin validate "$SRC/plugin" >/dev/null || fail "plugin manifest failed validation"
-luac -p "$SRC/hypr/keyarchy-shim.lua" || fail "shim has a Lua syntax error"
+omarchy plugin validate "$SRC" >/dev/null || fail "plugin manifest failed validation"
 
 # Drop the previous name so the bar does not keep two coaches.
 if [[ -d $OLD_PLUGIN_DEST ]] || [[ -f $OLD_SHIM_DEST ]] \
@@ -58,30 +57,17 @@ if [[ -d $OLD_PLUGIN_DEST ]] || [[ -f $OLD_SHIM_DEST ]] \
 fi
 
 # The plugin registry rejects symlinks, so the repo is the source and this is a
-# copy. Re-running overwrites it.
+# copy. `omarchy plugin add` clones instead; copying the tracked files gives the
+# same tree, so `doctor` can diff the two.
+[[ -d $SRC/.git ]] || fail "not a git checkout; install with 'omarchy plugin add' instead"
 rm -rf "$PLUGIN_DEST"
 mkdir -p "$PLUGIN_DEST"
-cp -a "$SRC"/plugin/. "$PLUGIN_DEST/"
+git -C "$SRC" ls-files -z ':!.cursor' | while IFS= read -r -d '' f; do
+  mkdir -p "$PLUGIN_DEST/$(dirname "$f")"
+  cp -a "$SRC/$f" "$PLUGIN_DEST/$f"
+done
 
-cp "$SRC/hypr/keyarchy-shim.lua" "$SHIM_DEST"
-
-if grep -qF 'hypr.keyarchy-shim' "$HYPRLAND_LUA"; then
-  echo "keyarchy: shim already loaded from hyprland.lua"
-else
-  grep -qF "$ANCHOR" "$HYPRLAND_LUA" \
-    || fail "could not find '$ANCHOR' in $HYPRLAND_LUA; add '$SHIM_LINE' above it by hand"
-
-  BACKUP="$HYPRLAND_LUA.bak.$(date +%s)"
-  cp "$HYPRLAND_LUA" "$BACKUP"
-  echo "keyarchy: backed up hyprland.lua to $BACKUP"
-
-  # The shim must wrap hl.bind before Omarchy registers any binding.
-  awk -v line="$SHIM_LINE" -v anchor="$ANCHOR" '
-    index($0, anchor) && !done { print "-- Keyarchy: wrap hl.bind before any binding is registered."; print line; done = 1 }
-    { print }
-  ' "$HYPRLAND_LUA" > "$HYPRLAND_LUA.keyarchy-tmp"
-  mv "$HYPRLAND_LUA.keyarchy-tmp" "$HYPRLAND_LUA"
-fi
+"$SRC/install-shim.sh"
 
 # The shell rescans plugin folders on its own, but `plugin enable` fails with
 # "unknown plugin" if it runs before that lands on a freshly copied folder.
@@ -92,18 +78,4 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 [[ $enabled == 1 ]] || echo "keyarchy: could not enable automatically; run 'omarchy plugin enable $PLUGIN_ID'" >&2
 
-if command -v hyprctl >/dev/null && [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
-  hyprctl reload >/dev/null
-  # Hyprland prints nothing here when the config is clean.
-  errors="$(hyprctl configerrors | grep -v '^[[:space:]]*$' || true)"
-  if [[ -n $errors ]]; then
-    echo "keyarchy: Hyprland reported config errors after reload:" >&2
-    echo "$errors" >&2
-    echo "keyarchy: run ./uninstall.sh to back this out" >&2
-    exit 1
-  fi
-  echo "keyarchy: hyprland reloaded cleanly ($(hyprctl binds -j | grep -c '"description"') binds registered)"
-fi
-
 echo "keyarchy: installed. Omarchy $(omarchy version 2>/dev/null || echo unknown)."
-echo "keyarchy: click a workspace in the bar to see it work."
