@@ -36,16 +36,25 @@ _G.hl = {
   bind = function(keys, dispatcher, opts)
     registered[#registered + 1] = { keys = keys, dispatcher = dispatcher, opts = opts }
     return "bind-handle:" .. tostring(keys)
-  end
+  end,
+  dsp = {
+    focus = function(opts)
+      return { kind = "focus", opts = opts }
+    end
+  }
 }
 
 local original_bind = _G.hl.bind
+local original_focus = _G.hl.dsp.focus
+local original_dispatch = _G.hl.dispatch
 package.path = os.getenv("HOME") .. "/.config/?.lua;" .. package.path
 local here = debug.getinfo(1, "S").source:match("^@(.*/)") or "./"
 local shim_path = here .. "../hypr/keyarchy-shim.lua"
 dofile(shim_path)
 
 check("wraps hl.bind", _G.hl.bind ~= original_bind)
+check("wraps hl.dsp.focus", _G.hl.dsp.focus ~= original_focus)
+check("wraps hl.dispatch", _G.hl.dispatch ~= original_dispatch)
 
 local handle = hl.bind("SUPER + code:12", "descriptor-workspace-3", { description = "Switch to workspace 3" })
 check("preserves hl.bind's return value (submaps collect it)", handle == "bind-handle:SUPER + code:12")
@@ -98,10 +107,37 @@ check("wrapping a function dispatcher preserves its return value", custom_entry.
 check("wrapping a function dispatcher preserves its arguments",
   received ~= nil and received[1] == 1 and received[2] == "two")
 
+local intent_path = temp_dir .. "/keyarchy/last-workspace-intent"
+
+local window_d = hl.dsp.focus({ window = "address:0xabc" })
+hl.dispatch(window_d)
+check("window focus dispatch does not write workspace intent", read_file(intent_path) == nil)
+
+local workspace_d = hl.dsp.focus({ workspace = 3 })
+check("workspace-only focus does not write intent", read_file(intent_path) == nil)
+hl.dispatch(workspace_d)
+check("workspace-only focus+dispatch writes intent", read_file(intent_path) == "workspace:3\n")
+
 -- Reloading the config re-requires the shim; it must not wrap twice.
 local wrapped_bind = _G.hl.bind
+local wrapped_focus = _G.hl.dsp.focus
+local wrapped_dispatch = _G.hl.dispatch
 dofile(shim_path)
 check("does not double-wrap on config reload", _G.hl.bind == wrapped_bind)
+check("does not double-wrap dsp.focus on config reload", _G.hl.dsp.focus == wrapped_focus)
+check("does not double-wrap dispatch on config reload", _G.hl.dispatch == wrapped_dispatch)
+
+-- Older shims set __keyarchy_installed without intent wraps. A reload after
+-- upgrade must still install focus/dispatch wraps once.
+_G.__keyarchy_intent_wrapped = nil
+_G.hl.dsp.focus = original_focus
+_G.hl.dispatch = original_dispatch
+dofile(shim_path)
+check("upgrade reload wraps dsp.focus when intent flag was missing", _G.hl.dsp.focus ~= original_focus)
+check("upgrade reload wraps dispatch when intent flag was missing", _G.hl.dispatch ~= original_dispatch)
+local upgrade_d = hl.dsp.focus({ workspace = 9 })
+hl.dispatch(upgrade_d)
+check("upgrade reload intent wrap writes the intent file", read_file(intent_path) == "workspace:9\n")
 
 os.execute("rm -rf '" .. temp_dir .. "'")
 

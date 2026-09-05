@@ -317,6 +317,22 @@ function beaconSuppresses(match, lastBeaconAt, lastBeaconDescription, entryAt, n
   return beacon === String(match && match.description || "")
 }
 
+function requiresWorkspaceIntent(match) {
+  return /^workspace:/.test(String(match && match.action || ""))
+}
+
+function workspaceIntentAllows(match, lastIntentAt, lastIntentAction, entryAt, now, options) {
+  if (!requiresWorkspaceIntent(match)) return true
+  if (!lastIntentAt) return false
+
+  var leadMs = options && options.intentLeadMs != null ? options.intentLeadMs : 150
+  var matchMs = options && options.intentMatchMs != null ? options.intentMatchMs : 5000
+  if (now - lastIntentAt > matchMs) return false
+  if (String(lastIntentAction || "") !== String(match.action || "")) return false
+  if (lastIntentAt >= entryAt - leadMs) return true
+  return false
+}
+
 function categoryFor(action) {
   var prefix = String(action || "").split(":")[0]
   return CATEGORY_OF_ACTION[prefix] || null
@@ -529,6 +545,8 @@ if (typeof module !== "undefined") {
     focusHint: focusHint,
     keysForAction: keysForAction,
     beaconSuppresses: beaconSuppresses,
+    requiresWorkspaceIntent: requiresWorkspaceIntent,
+    workspaceIntentAllows: workspaceIntentAllows,
     categoryFor: categoryFor,
     shouldNotify: shouldNotify,
     recordNotified: recordNotified,

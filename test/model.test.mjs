@@ -313,3 +313,20 @@ test("parseCounts survives junk", () => {
   assert.deepEqual(Model.parseCounts("nope"), {})
   assert.deepEqual(Model.parseCounts(""), {})
 })
+
+test("requiresWorkspaceIntent only for workspace:N, never move-to-workspace", () => {
+  assert.equal(Model.requiresWorkspaceIntent({ action: "workspace:3" }), true)
+  assert.equal(Model.requiresWorkspaceIntent({ action: "move-to-workspace:2" }), false)
+  assert.equal(Model.requiresWorkspaceIntent({ action: "close-window" }), false)
+})
+
+test("workspaceIntentAllows fail-closes workspace teaches without a fresh matching intent", () => {
+  const match = { action: "workspace:3", category: "workspace", description: "Switch to workspace 3" }
+  assert.equal(Model.workspaceIntentAllows(match, 0, "", 1000, 1250, {}), false)
+  assert.equal(Model.workspaceIntentAllows(match, 1000, "workspace:3", 1050, 1300, {}), true)
+  assert.equal(Model.workspaceIntentAllows(match, 1000, "workspace:2", 1050, 1300, {}), false)
+  assert.equal(Model.workspaceIntentAllows(
+    { action: "move-to-workspace:2", category: "workspace", description: "Move window to workspace 2" },
+    0, "", 1000, 1250, {}
+  ), true)
+})
