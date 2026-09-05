@@ -1,28 +1,25 @@
 # Keyarchy
 
-Learn Omarchy's keybindings without reading the list.
+Learn Omarchy's keyboard shortcuts as you use your desktop.
 
 ![Omarchy 4](https://img.shields.io/badge/Omarchy-4%20(Quattro)-1a1a1a)
 ![Hyprland 0.56](https://img.shields.io/badge/Hyprland-0.56-1a1a1a)
 ![Quickshell plugin](https://img.shields.io/badge/omarchy--shell-service%20%2B%20bar%20widget-1a1a1a)
 [![license: MIT](https://img.shields.io/badge/license-MIT-1a1a1a)](LICENSE)
 
-Omarchy ships more than 200 keyboard shortcuts. You will learn a dozen from the
-manual and keep clicking for the rest, because a cheatsheet can only tell you a
-binding exists — it can't tell you when you needed it.
-
-Keyarchy can. It watches for the moment you reach for the mouse to do something
-the keyboard already does, and teaches you that one shortcut, right then.
+Keyarchy shows you the keyboard shortcut for an action you just took with the
+mouse. Click a workspace, close a window, or open an app, and you'll get a small
+reminder of the binding you could use next time.
 
 ![Keyarchy teaching a workspace shortcut](preview.png)
 
-Click workspace 5 in the bar and you get:
+For example, clicking workspace 5 in the bar shows:
 
 ![Switch to workspace 5 — SUPER + 5](docs/notification-closeup.png)
 
-Press `SUPER + 5` next time and Keyarchy says nothing. It only teaches what you
-have not learned yet — five reminders per action, then it assumes you have it
-and goes quiet for good.
+Use `SUPER + 5` instead and there's no reminder. By default, Keyarchy shows each
+lesson at most five times, with a five-minute gap between reminders for the same
+action. You can mute individual lessons or adjust these limits.
 
 ## Requirements
 
@@ -36,15 +33,14 @@ omarchy plugin add https://github.com/seth-wood/keyarchy.git --enable
 ~/.config/omarchy/plugins/slw.keyarchy/install-shim.sh
 ```
 
-The second line is not optional. `plugin add` installs the shell plugin, but
-Keyarchy cannot tell a keystroke from a mouse click without a Hyprland Lua shim
-(see [How it works](#how-it-works)), and that half lives outside the plugin
-folder. `install-shim.sh` copies it to `~/.config/hypr/keyarchy-shim.lua`, adds
-one `require` line to `hyprland.lua` — backing the file up first — and reloads
-Hyprland, aborting if Hyprland reports a config error. It is safe to re-run.
+Both commands are required. The first installs the shell plugin. The second
+installs a small Hyprland Lua shim that lets Keyarchy recognize keyboard actions
+(see [How it works](#how-it-works)).
 
-Until the shim is in place Keyarchy stays silent rather than guessing, so an
-install that stops after the first line is quiet, not broken.
+`install-shim.sh` copies the shim to `~/.config/hypr/keyarchy-shim.lua`, backs up
+`hyprland.lua`, adds a `require` line, and reloads Hyprland. It aborts if Hyprland
+reports a config error, and is safe to run again. Keyarchy won't show reminders
+until the shim is installed.
 
 If you skipped the bar placement prompt: `omarchy plugin enable slw.keyarchy right`.
 
@@ -59,8 +55,7 @@ lesson history is left at `~/.local/state/keyarchy/`.
 
 ## What it teaches
 
-The everyday bindings — the ones worth having in your hands, and the ones you
-are most likely to do with the mouse instead:
+Keyarchy currently recognizes these actions:
 
 | You did | It suggests |
 |---|---|
@@ -72,39 +67,33 @@ are most likely to do with the mouse instead:
 | Opened a bound app | that app's binding |
 | Changed window focus | `Focus on <direction> window` — **off by default** |
 
-Bindings are matched by their **description**, never by dispatcher. Rebind
-`Close window` to something else and the notification follows it.
+Keyarchy matches bindings by their description. If you change the keys for
+`Close window` and keep its description, the reminder will show your new binding.
 
-Focus is off because it fires on nearly every interaction, including as a side
-effect of opening and closing windows. Turn it on in the panel if you want it.
+Focus reminders are off by default because focus changes frequently, including
+when you open or close a window. You can turn them on in the panel.
 
-Not covered yet: opening the Omarchy menu, launcher, emoji picker, and clipboard
-by clicking the bar. Those are layer-shell surfaces rather than Hyprland window
-events and need separate detection.
+Keyarchy doesn't yet detect clicks that open the Omarchy menu, launcher, emoji
+picker, or clipboard from the bar. These use layer-shell surfaces and need
+separate detection from regular window events.
 
 ## The bar widget
 
 <img src="docs/panel.png" alt="The Keyarchy panel" width="380" align="right">
 
-Notifications can only teach you a shortcut for something you already did — and
-most of Omarchy's keymap is for things you have never thought to do. The panel
-is the other half of learning it: what you have covered, and what is still
-sitting there unused.
+The panel shows which shortcuts you've used and helps you find others to try.
+It includes:
 
-- **How much of your keymap you actually reach for.** "27 of 212 shortcuts
-  used". The shim's beacon names the binding that fired, so the service counts
-  activations by description; nothing extra is needed to know what you press.
-- **Shortcuts you have never used**, three at a time, with a button (or `n`) to
-  walk through the rest.
-- **Teaching switches** for the four categories, including the focus category
-  that is otherwise off in a config file you would have to know about.
-- **What it has taught you**, newest first, with a check mark on the ones it has
-  stopped teaching and a bell to mute one without disabling the rest. A reset
-  button at the bottom forgets everything and starts the lessons over.
+- A count of the shortcuts you've used, such as "27 of 212 shortcuts used".
+- Three unused shortcuts at a time. Click the next button or press `n` to see more.
+- Switches for the four reminder categories: window, workspace, launch, and focus.
+- Your lesson history, newest first. A check mark means a lesson has reached its
+  reminder limit; the bell lets you mute it. The reset button clears your history
+  and starts the lessons over.
 
 **Left click** opens the panel. **Right click** toggles Keyarchy off and on.
 
-The mark sits with the other status icons:
+Here's how the widget looks in the bar:
 
 <img src="docs/bar.png" alt="The Keyarchy mark on the Omarchy bar" width="440">
 
@@ -112,8 +101,8 @@ The mark sits with the other status icons:
 
 ## Settings
 
-Keyarchy reads its own entry in `~/.config/omarchy/shell.json`, the same way bar
-widgets do. Hot-reloads on save, and the panel switches write to the same place.
+Settings live in Keyarchy's entry in `~/.config/omarchy/shell.json`. Changes take
+effect when you save the file. The panel switches update the same settings.
 
 ```jsonc
 {
@@ -136,22 +125,19 @@ widgets do. Hot-reloads on save, and the panel switches write to the same place.
 }
 ```
 
-How many times you have been taught each action is kept in
-`~/.local/state/keyarchy/state.json`. Delete it, then `omarchy restart shell`,
-to start the lessons over.
+Lesson history is stored in `~/.local/state/keyarchy/state.json`. To reset it
+manually, delete that file and run `omarchy restart shell`.
 
 ## How it works
 
-This is the whole trick, and it is worth understanding before you trust it.
-
-Hyprland's event socket reports *what happened* but never *what caused it*. A
+Hyprland's event socket reports what happened, but not what caused it. A
 workspace change looks identical whether you pressed `SUPER + 5` or clicked the
-bar. Hyprland 0.56 logs nothing on keybind dispatch, and reading `/dev/input`
-directly would mean joining the `input` group — which lets every process you run
-read every key you type. Not worth it for a hint popup.
+bar. Keyarchy needs an additional signal to tell those actions apart.
 
-So Keyarchy gets the signal from the other end. Omarchy defines all its bindings
-in Lua through `hl.bind`, so the shim wraps that function:
+Omarchy defines its bindings in Lua through `hl.bind`. The shim wraps that
+function so each keyboard binding updates a small beacon file before running
+its original dispatcher. This lets Keyarchy recognize shortcut use without
+reading raw input from `/dev/input`.
 
 ```
 keypress ─► hl.bind wrapper ─► touch beacon file ─► original dispatcher
@@ -163,18 +149,18 @@ mouse click ─► Hyprland socket2 ─► Service.qml ─► beacon in the last
                                             look up the bind, notify
 ```
 
-The beacon is a positive "the keyboard did this" signal. Any teachable event
-without one alongside it came from somewhere else. The service waits 250 ms
-before judging, because the beacon write and the socket event race each other.
+When a supported event arrives, the service checks for a recent beacon. If it
+finds one, it skips the reminder. Otherwise, it looks up the matching binding
+and may show a lesson. It waits 250 ms before checking to allow time for both
+the beacon write and the socket event to arrive.
 
-If the shim is not installed, no beacon ever appears — so the plugin goes silent
-rather than firing on every keystroke. That is the intended failure mode.
+Reminders stay disabled when the shim isn't installed.
 
 ### Why the shim also exports the bindings
 
-`hyprctl binds -j` reports `key: ""` and `keycode: 0` for the 59 bindings
-Omarchy defines by keycode — which includes *every workspace shortcut*, the ones
-most worth teaching. The shim sees the real `"SUPER + code:12"` string at config
+`hyprctl binds -j` reports `key: ""` and `keycode: 0` for bindings
+Omarchy defines by keycode, including workspace shortcuts. The shim sees the
+original `"SUPER + code:12"` string at config
 time and writes `$XDG_RUNTIME_DIR/keyarchy/binds.json`, so Keyarchy can render
 `SUPER + 5`.
 
@@ -187,11 +173,11 @@ cd keyarchy
 omarchy restart shell  # a service plugin is only mounted at shell startup
 ```
 
-The repo root *is* the plugin folder — `omarchy plugin add` clones the whole
-repo into `~/.config/omarchy/plugins/slw.keyarchy/`, so the manifest and the QML
-sit at the top and everything else rides along. `./install.sh` reproduces that
-copy from a checkout; the plugin registry rejects symlinks, so re-run it after
-editing.
+The repository root doubles as the plugin folder. `omarchy plugin add` clones
+it into `~/.config/omarchy/plugins/slw.keyarchy/`, with the manifest and QML files
+at the top level. For local development, `./install.sh` copies your checkout
+there. The plugin registry doesn't accept symlinks, so run the installer again
+after editing, then restart the shell.
 
 ```
 manifest.json          kinds: service + bar-widget, id slw.keyarchy
@@ -208,13 +194,13 @@ test/
   shim.test.lua        lua test/shim.test.lua — mocks hl, no compositor needed
 ```
 
-Gotchas worth knowing before you spend an afternoon on one:
+A few things to keep in mind when developing:
 
 - **Quickshell connects the Hyprland event socket lazily.** A bare
   `Connections { target: Hyprland }` in a headless service never fires, because
   declaring the connection does not count as using the singleton. `Service.qml`
   touches `Hyprland.workspaces` at startup to force the connection. Remove that
-  line and Keyarchy goes silent with no error.
+  line and Keyarchy stops receiving events without reporting an error.
 - **Editing the repo does not update the installed plugin.** Re-run
   `./install.sh`, then `omarchy restart shell` — a service plugin is mounted at
   shell startup, so `omarchy plugin enable` mid-session is not enough on a first
@@ -222,7 +208,7 @@ Gotchas worth knowing before you spend an afternoon on one:
 - **Deleting `state.json` needs a shell restart.** The running service holds the
   lesson history in memory and only reads the file at startup.
 - **Do not name a plugin file after the type it extends.** A local `Panel.qml`
-  shadows `qs.Ui.Panel`, and the shell reports it as the memorable "File name
+  shadows `qs.Ui.Panel`, and the shell reports a "File name
   case mismatch". The entry point is `KeyarchyPanel.qml` for that reason.
 - **A bar widget needs `implicitWidth`/`implicitHeight`.** Without them it
   occupies a zero-width slot and renders nothing, with no error anywhere.
@@ -234,18 +220,19 @@ Gotchas worth knowing before you spend an afternoon on one:
 
 ## Caveats
 
-- **The shim wraps every keybind on your machine.** `test/shim.test.lua` mocks
-  Hyprland's `hl` table and checks the things that would break your desktop —
-  return values preserved, dispatchers still fired, arguments passed through,
-  mouse binds left alone, no double-wrapping on reload. Run it before installing
-  any change to the shim.
+- **The shim wraps keyboard bindings registered through `hl.bind`.**
+  `test/shim.test.lua` mocks Hyprland's `hl` table to check that return values,
+  dispatchers, and arguments are preserved, mouse bindings are left alone, and
+  reloading doesn't wrap bindings twice. Run it before installing any change
+  to the shim.
 - `hl.bind` and `hl.dsp` are **undocumented** Omarchy 4 internals. If an update changes
-  them, the shim stops beaconing and Keyarchy goes quiet. It should not break
+  them, the shim may stop updating the beacon and Keyarchy may stop showing
+  reminders. It should not break
   Hyprland — the shim no-ops when `hl.bind` is missing — but check after an
   update.
 - Mouse bindings (`SUPER` + drag) are deliberately not wrapped; a Lua callback
   would swallow the press/release semantics that drag-to-move depends on.
-- Web app bindings (ChatGPT, Email, and friends) are not detected yet. They open
+- Web app bindings, such as ChatGPT and Email, are not detected yet. They open
   as generic Chromium classes that need URL matching to tell apart.
 
 ## License
