@@ -93,10 +93,6 @@ It includes:
 
 **Left click** opens the panel. **Right click** toggles Keyarchy off and on.
 
-Here's how the widget looks in the bar:
-
-<img src="docs/bar.png" alt="The Keyarchy mark on the Omarchy bar" width="440">
-
 <br clear="all">
 
 ## Settings
