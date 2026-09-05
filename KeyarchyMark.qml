@@ -1,27 +1,33 @@
 import QtQuick
-import QtQuick.Effects
-import QtQuick.Window
 
 Item {
   id: root
 
   property color foreground: "#ffffff"
 
-  Image {
-    id: markImage
-    anchors.fill: parent
-    fillMode: Image.PreserveAspectFit
-    source: Qt.resolvedUrl("assets/mark.svg")
-    sourceSize.width: Math.round(Math.min(width, height) * Screen.devicePixelRatio)
-    sourceSize.height: Math.round(Math.min(width, height) * Screen.devicePixelRatio)
-    visible: false
-    layer.enabled: true
+  readonly property real unit: Math.min(width, height) / 24
+
+  Rectangle {
+    x: 3 * root.unit
+    y: 3 * root.unit
+    width: 6 * root.unit
+    height: 6 * root.unit
+    color: root.foreground
   }
 
-  MultiEffect {
-    anchors.fill: markImage
-    source: markImage
-    colorization: 1.0
-    colorizationColor: root.foreground
+  Rectangle {
+    x: 12 * root.unit
+    y: 3 * root.unit
+    width: 9 * root.unit
+    height: 6 * root.unit
+    color: root.foreground
+  }
+
+  Rectangle {
+    x: 3 * root.unit
+    y: 12 * root.unit
+    width: 18 * root.unit
+    height: 9 * root.unit
+    color: root.foreground
   }
 }
