@@ -59,6 +59,89 @@ test("stays quiet for events with nothing to teach", () => {
   assert.equal(Model.classify("workspacev2", ""), null)
 })
 
+function replayCompositorGate(events) {
+  let focus = Model.emptyFocus()
+  const queued = []
+  for (const [name, data] of events) {
+    focus = Model.noteFocus(focus, name, data)
+    const match = Model.classify(name, data)
+    if (!match) continue
+    if (Model.compositorOwnsAction(match, focus)) continue
+    queued.push(match.action)
+  }
+  return { focus, queued }
+}
+
+test("does not teach fullscreen for the Omarchy screensaver windowrule", () => {
+  assert.equal(Model.classify("fullscreen", "1").action, "fullscreen")
+
+  const { focus, queued } = replayCompositorGate([
+    ["openwindow", "0x1,1,org.omarchy.screensaver,foot"],
+    ["activewindow", "org.omarchy.screensaver,foot"],
+    ["activewindowv2", "0x1"],
+    ["fullscreen", "1"]
+  ])
+
+  assert.equal(focus.className, "org.omarchy.screensaver")
+  assert.equal(focus.title, "foot")
+  assert.ok(!queued.includes("fullscreen"))
+})
+
+test("still teaches fullscreen for an ordinary focused window", () => {
+  const match = Model.classify("fullscreen", "1")
+  const focus = { className: "Alacritty", title: "zsh" }
+  assert.equal(Model.compositorOwnsAction(match, focus), false)
+})
+
+test("still teaches fullscreen when an ordinary window maps then goes fullscreen", () => {
+  const { queued } = replayCompositorGate([
+    ["openwindow", "0x2,1,Alacritty,zsh"],
+    ["activewindow", "Alacritty,zsh"],
+    ["activewindowv2", "0x2"],
+    ["fullscreen", "1"]
+  ])
+  assert.ok(queued.includes("fullscreen"))
+})
+
+test("treats other Omarchy auto-fullscreen windowrules as compositor-owned", () => {
+  const match = Model.classify("fullscreen", "1")
+  assert.equal(
+    Model.compositorOwnsAction(match, { className: "com.moonlight_stream.Moonlight", title: "" }),
+    true
+  )
+  assert.equal(
+    Model.compositorOwnsAction(match, { className: "com.libretro.RetroArch", title: "" }),
+    true
+  )
+  assert.equal(
+    Model.compositorOwnsAction(match, {
+      className: "resolve",
+      title: "DaVinci Resolve - Untitled Project"
+    }),
+    true
+  )
+  assert.equal(
+    Model.compositorOwnsAction(match, { className: "resolve", title: "Project Manager" }),
+    false
+  )
+})
+
+test("noteFocus only learns identity from activewindow", () => {
+  let focus = Model.emptyFocus()
+  focus = Model.noteFocus(focus, "openwindow", "0x1,1,org.omarchy.screensaver,foot")
+  assert.equal(focus.className, "")
+  focus = Model.noteFocus(focus, "activewindowv2", "0x1")
+  assert.equal(focus.className, "")
+  focus = Model.noteFocus(focus, "activewindow", "org.omarchy.screensaver,foot")
+  assert.equal(focus.className, "org.omarchy.screensaver")
+  assert.equal(focus.title, "foot")
+})
+
+test("fails open when focus identity is unknown", () => {
+  const match = Model.classify("fullscreen", "1")
+  assert.equal(Model.compositorOwnsAction(match, Model.emptyFocus()), false)
+})
+
 test("collapses the four directional focus binds into one hint", () => {
   const binds = {
     "Focus on left window": "SUPER + ←",
