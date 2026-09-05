@@ -8,6 +8,10 @@
 --      than `hyprctl binds -j`, which reports an empty key for the 59 `code:NN`
 --      binds -- including every workspace switch.
 --
+-- Wraps hl.dsp.focus / hl.dispatch to stamp last-workspace-intent only when a
+-- workspace-only focus descriptor is actually dispatched. Bind registration
+-- calls focus without dispatch; a window-targeted focus is not a workspace switch.
+--
 -- Installed to ~/.config/hypr/keyarchy-shim.lua and required from hyprland.lua
 -- BEFORE require("default.hypr.omarchy"). Removing that require fully disables
 -- this file; the plugin then degrades to silence rather than misfiring.
@@ -21,6 +25,7 @@ end
 
 local state_dir = runtime_dir .. "/keyarchy"
 local beacon_path = state_dir .. "/last-bind"
+local intent_path = state_dir .. "/last-workspace-intent"
 local binds_path = state_dir .. "/binds.json"
 
 -- Requiring this module means Hyprland is (re)loading its config, so the bind
@@ -77,7 +82,11 @@ local function is_mouse_bind(keys, opts)
   return type(keys) == "string" and keys:lower():find("mouse") ~= nil
 end
 
-function M.install()
+local function is_workspace_only_focus(opts)
+  return type(opts) == "table" and opts.workspace ~= nil and opts.window == nil
+end
+
+local function install_bind_wrap()
   if _G.__keyarchy_installed then return end
   if type(hl) ~= "table" or type(hl.bind) ~= "function" then return end
 
@@ -113,6 +122,52 @@ function M.install()
     -- collect hl.bind(...) results into a list.
     return original_bind(keys, wrapped, opts)
   end
+end
+
+-- Separate flag so a config reload after upgrading Keyarchy can add intent
+-- wraps even when the bind wrap was already installed by an older shim.
+local function install_workspace_intent_wrap()
+  if _G.__keyarchy_intent_wrapped then return end
+  if type(hl) ~= "table" then return end
+
+  local pending_workspace_intent = nil
+  local wrapped_any = false
+
+  if type(hl.dsp) == "table" and type(hl.dsp.focus) == "function" then
+    local original_focus = hl.dsp.focus
+    hl.dsp.focus = function(opts)
+      local descriptor = original_focus(opts)
+      if is_workspace_only_focus(opts) then
+        pending_workspace_intent = {
+          dispatcher = descriptor,
+          action = "workspace:" .. tostring(opts.workspace)
+        }
+      end
+      return descriptor
+    end
+    wrapped_any = true
+  end
+
+  if type(hl.dispatch) == "function" then
+    local original_dispatch = hl.dispatch
+    hl.dispatch = function(descriptor)
+      if pending_workspace_intent ~= nil and descriptor == pending_workspace_intent.dispatcher then
+        write_file(intent_path, pending_workspace_intent.action .. "\n")
+      end
+      return original_dispatch(descriptor)
+    end
+    wrapped_any = true
+  end
+
+  if wrapped_any then
+    _G.__keyarchy_intent_wrapped = true
+    os.execute("mkdir -p '" .. state_dir .. "' 2>/dev/null")
+  end
+end
+
+function M.install()
+  install_bind_wrap()
+  install_workspace_intent_wrap()
 end
 
 M.install()

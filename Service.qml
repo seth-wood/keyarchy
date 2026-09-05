@@ -7,10 +7,11 @@ import "KeyarchyModel.js" as Model
 // Keyarchy: teaches the keybinding for an action you just did with the mouse.
 //
 // The Lua shim in ~/.config/hypr/keyarchy-shim.lua touches a beacon file every
-// time a keybind fires. Any Hyprland event that arrives without a beacon
-// alongside it came from somewhere else -- a bar click, the menu, a titlebar --
-// and is worth a lesson. Without the shim no beacon ever appears, so this
-// service goes quiet rather than nagging on every keystroke.
+// time a keybind fires. Events without a beacon came from somewhere else.
+// Workspace switches also need last-workspace-intent, stamped only when a
+// workspace-only focus descriptor is dispatched, so focusing a window on
+// another workspace does not teach "Switch to workspace N". Without the shim
+// both files stay empty, so this service goes quiet rather than nagging.
 Item {
   id: root
 
@@ -24,6 +25,7 @@ Item {
   readonly property string statePath: stateDir + "/state.json"
   readonly property string usagePath: stateDir + "/usage.json"
   readonly property string beaconPath: runtimeDir + "/keyarchy/last-bind"
+  readonly property string workspaceIntentPath: runtimeDir + "/keyarchy/last-workspace-intent"
   readonly property string bindsPath: runtimeDir + "/keyarchy/binds.json"
 
   readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "slw.keyarchy"
@@ -62,6 +64,8 @@ Item {
   property real lastBeaconAt: 0
   property string lastBeaconDescription: ""
   property bool countNextBeacon: false
+  property real lastWorkspaceIntentAt: 0
+  property string lastWorkspaceIntentAction: ""
   property var pending: []
 
   // Which bindings you actually press, counted by description. The beacon
@@ -81,6 +85,8 @@ Item {
   readonly property int verdictDelayMs: 250
   readonly property int beaconLeadMs: 150
   readonly property int beaconMatchMs: 5000
+  readonly property int intentLeadMs: 150
+  readonly property int intentMatchMs: 5000
 
   function loadBinds(text) {
     var parsed = Model.parseShimBinds(text)
@@ -102,6 +108,12 @@ Item {
     var description = String(text || "").split("\n")[0]
     root.lastBeaconDescription = description
     return description
+  }
+
+  function noteWorkspaceIntent(text) {
+    var action = String(text || "").split("\n")[0]
+    root.lastWorkspaceIntentAction = action
+    return action
   }
 
   function countUsage(description) {
@@ -166,6 +178,7 @@ Item {
     var now = Date.now()
     var remaining = []
     var beaconOpts = { beaconLeadMs: root.beaconLeadMs, beaconMatchMs: root.beaconMatchMs }
+    var intentOpts = { intentLeadMs: root.intentLeadMs, intentMatchMs: root.intentMatchMs }
 
     for (var i = 0; i < root.pending.length; i++) {
       var entry = root.pending[i]
@@ -177,6 +190,10 @@ Item {
       if (Model.beaconSuppresses(
         entry.match, root.lastBeaconAt, root.lastBeaconDescription,
         entry.at, now, beaconOpts
+      )) continue
+      if (!Model.workspaceIntentAllows(
+        entry.match, root.lastWorkspaceIntentAt, root.lastWorkspaceIntentAction,
+        entry.at, now, intentOpts
       )) continue
 
       teach(entry.match, now)
@@ -245,6 +262,18 @@ Item {
         root.countUsage(description)
       }
     }
+  }
+
+  FileView {
+    id: workspaceIntentFile
+    path: root.workspaceIntentPath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: {
+      root.lastWorkspaceIntentAt = Date.now()
+      reload()
+    }
+    onLoaded: root.noteWorkspaceIntent(text())
   }
 
   FileView {

@@ -120,20 +120,30 @@ Lesson history is at `~/.local/state/keyarchy/state.json`. Delete it and run
 ## How it works
 
 Hyprland's event socket reports what happened, not what caused it. A workspace
-change looks the same whether you pressed `SUPER + 5` or clicked the bar.
+change looks the same whether you pressed `SUPER + 5`, clicked the bar, or
+focused a window that lived on another workspace (a link that activates a
+browser elsewhere).
 
 Omarchy defines its bindings in Lua through `hl.bind`. The shim wraps that
 function so each keyboard binding touches a beacon file before running. When a
 supported event arrives, Keyarchy waits 250 ms, then checks for a recent
-beacon. Find one, and it stays quiet. Otherwise it looks up the matching bind
-and may show a lesson.
+beacon. Find one, and it stays quiet.
+
+Workspace *switches* need one more signal. The shim also wraps `hl.dsp.focus` /
+`hl.dispatch` so an intentional `focus({ workspace = N })` (bar click, verify
+script) stamps `last-workspace-intent`. Focusing a window does not. Without a
+fresh intent, Keyarchy does not teach `Switch to workspace N`. Other lessons
+still use the beacon-only rule.
 
 ```
 keypress ─► hl.bind wrapper ─► touch beacon file ─► original dispatcher
                                     │
                                     ▼ (inotify)
-mouse click ─► Hyprland socket2 ─► Service.qml ─► beacon in the last 400ms?
+mouse / focus ─► Hyprland socket2 ─► Service.qml ─► beacon recent?
                                                    │ no
+                                                   ▼
+                                      workspace switch? need intent stamp
+                                                   │ ok
                                                    ▼
                                             look up the bind, notify
 ```
