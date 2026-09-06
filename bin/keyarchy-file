@@ -1,0 +1,200 @@
+#!/usr/bin/python3 -I
+"""Descriptor-bound reader and writer for Keyarchy's files.
+
+Every file Keyarchy reads is written by something else: the Hyprland shim
+writes the runtime files, and the service and the bar widget write each
+other's state. So nothing here resolves a pathname twice. The directory chain
+is walked with held descriptors, the file is opened O_NOFOLLOW|O_NONBLOCK and
+validated on the descriptor that was actually opened, and a write lands on an
+exclusively created temporary that is renamed over the destination -- rename
+replaces a symlink sitting on the name instead of writing through it.
+
+  keyarchy-file read  <state|runtime> <name>   -> contents on stdout
+  keyarchy-file write <state|runtime> <name>   <- contents on stdin
+
+Exit codes: 0 ok, 2 usage, 3 payload too large, 4 refused.
+"""
+
+import json
+import os
+import pwd
+import re
+import secrets
+import stat
+import sys
+
+MAX_BYTES = 65536
+
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+# The one shape a runtime directory is allowed to have. Anything else -- unset,
+# a relative path, the /tmp fallback this plugin used to accept -- is refused
+# rather than repaired, because a runtime path another account can pre-create
+# is a runtime path another account owns.
+RUNTIME_RE = re.compile(r"/run/user/[0-9]+")
+
+USAGE, TOO_LARGE, REFUSED = 2, 3, 4
+
+
+class Refused(Exception):
+    pass
+
+
+def home_dir():
+    """The passwd home, not $HOME: the environment is inherited, passwd is not."""
+    return pwd.getpwuid(os.geteuid()).pw_dir
+
+
+def runtime_dir():
+    value = (os.environ.get("XDG_RUNTIME_DIR") or "").rstrip("/")
+    if not RUNTIME_RE.fullmatch(value):
+        raise Refused("XDG_RUNTIME_DIR is not /run/user/<uid>")
+    return value
+
+
+def open_dir(parent_fd, name, mode):
+    """openat one component, creating it at `mode` if it is missing."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    try:
+        return os.open(name, flags, dir_fd=parent_fd)
+    except FileNotFoundError:
+        try:
+            os.mkdir(name, mode, dir_fd=parent_fd)
+        except FileExistsError:
+            # Lost a race with another Keyarchy process; the open below decides
+            # whether what won the race is acceptable.
+            pass
+        return os.open(name, flags, dir_fd=parent_fd)
+
+
+def open_chain(anchor, parts):
+    """Walk `parts` from `anchor` with held descriptors; return the leaf dirfd.
+
+    O_NOFOLLOW on every component means a symlink anywhere in the chain is an
+    error rather than a redirect, and the uid check runs against the directory
+    that was opened, not against the name that was typed.
+    """
+    fd = os.open(anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        for name, mode in parts:
+            next_fd = open_dir(fd, name, mode)
+            os.close(fd)
+            fd = next_fd
+            st = os.fstat(fd)
+            if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
+                raise Refused("untrusted directory component %r" % name)
+        # Only the leaf is Keyarchy's to tighten. Repairing the mode of a
+        # shared parent like ~/.local would be this plugin editing directories
+        # it does not own.
+        st = os.fstat(fd)
+        if st.st_mode & 0o077:
+            os.fchmod(fd, 0o700)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def chain_for(root):
+    if root == "state":
+        return home_dir(), [(".local", 0o755), ("state", 0o700), ("keyarchy", 0o700)]
+    if root == "runtime":
+        return runtime_dir(), [("keyarchy", 0o700)]
+    raise Refused("unknown root %r" % root)
+
+
+def read_bounded(dir_fd, name):
+    """Read at most MAX_BYTES from a descriptor proved to be a regular file."""
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    try:
+        fd = os.open(name, flags, dir_fd=dir_fd)
+    except FileNotFoundError:
+        return b""
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise Refused("not a regular file")
+        if st.st_uid != os.geteuid():
+            raise Refused("not owned by this user")
+        if st.st_nlink != 1:
+            raise Refused("hard-linked")
+        if st.st_size > MAX_BYTES:
+            raise Refused("larger than %d bytes" % MAX_BYTES)
+        # O_NONBLOCK kept the open from hanging on a FIFO; the fstat above
+        # proved this is a regular file, so blocking reads are safe now.
+        os.set_blocking(fd, True)
+        data = b""
+        while len(data) <= MAX_BYTES:
+            chunk = os.read(fd, min(65536, MAX_BYTES + 1 - len(data)))
+            if not chunk:
+                break
+            data += chunk
+        if len(data) > MAX_BYTES:
+            raise Refused("grew past %d bytes while being read" % MAX_BYTES)
+        return data
+    finally:
+        os.close(fd)
+
+
+def write_atomic(dir_fd, name, payload):
+    """Publish `payload` at `name` through a fresh 0600 temporary."""
+    tmp = ".%s.%s.tmp" % (name, secrets.token_hex(8))
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open(tmp, flags, 0o600, dir_fd=dir_fd)
+    try:
+        os.fchmod(fd, 0o600)
+        view = memoryview(payload)
+        while view:
+            view = view[os.write(fd, view):]
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.rename(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        os.fsync(dir_fd)
+    except BaseException:
+        try:
+            os.unlink(tmp, dir_fd=dir_fd)
+        except OSError:
+            pass
+        raise
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def main(argv):
+    if len(argv) != 4:
+        sys.stderr.write(__doc__)
+        return USAGE
+    op, root, name = argv[1], argv[2], argv[3]
+    if op not in ("read", "write") or not NAME_RE.fullmatch(name):
+        return USAGE
+
+    anchor, parts = chain_for(root)
+    dir_fd = open_chain(anchor, parts)
+    try:
+        if op == "read":
+            sys.stdout.buffer.write(read_bounded(dir_fd, name))
+            sys.stdout.buffer.flush()
+            return 0
+
+        payload = sys.stdin.buffer.read(MAX_BYTES + 1)
+        if len(payload) > MAX_BYTES:
+            return TOO_LARGE
+        # Keyarchy only ever publishes JSON documents. Parsing here means a
+        # half-serialized write never replaces a good state file.
+        json.loads(payload or b"{}")
+        write_atomic(dir_fd, name, payload)
+        return 0
+    finally:
+        os.close(dir_fd)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv))
+    except Refused as error:
+        sys.stderr.write("keyarchy-file: refused: %s\n" % error)
+        sys.exit(REFUSED)
+    except (OSError, ValueError) as error:
+        sys.stderr.write("keyarchy-file: %s\n" % error)
+        sys.exit(REFUSED)

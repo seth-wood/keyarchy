@@ -49,10 +49,53 @@ If you skipped the bar placement prompt: `omarchy plugin enable slw.keyarchy rig
 
 ```bash
 ~/.config/omarchy/plugins/slw.keyarchy/uninstall.sh
+omarchy plugin remove slw.keyarchy
 ```
 
-Removes the plugin, the shim, the `require` line, and the bar entry. Lesson
-history stays at `~/.local/state/keyarchy/`.
+Run `uninstall.sh` first: it is the only thing that takes the shim back out of
+`hyprland.lua`, and it stops working once the plugin folder is gone.
+`omarchy plugin remove slw.keyarchy` then drops the folder itself. Running
+`uninstall.sh` alone is enough — it removes the folder too.
+
+**Removed**
+
+| Path | What it is |
+|---|---|
+| `~/.config/omarchy/plugins/slw.keyarchy/` | the plugin |
+| `~/.config/hypr/keyarchy-shim.lua` | the Hyprland shim |
+| the `require("hypr.keyarchy-shim")` line in `~/.config/hypr/hyprland.lua` | and the comment above it |
+| the `slw.keyarchy` entry in `~/.config/omarchy/shell.json` | bar placement and settings |
+| `$XDG_RUNTIME_DIR/keyarchy/{binds.json,last-bind,last-workspace-intent}` | runtime files, gone at reboot anyway |
+
+**Kept, on purpose**
+
+| Path | What it is |
+|---|---|
+| `~/.local/state/keyarchy/state.json` | which lessons you have been shown, and when |
+| `~/.local/state/keyarchy/usage.json` | how many times you have pressed each shortcut |
+| `~/.config/hypr/hyprland.lua.bak.*` | the backups taken before each edit |
+
+Delete them with `rm -rf ~/.local/state/keyarchy` if you want nothing left.
+Nothing keeps running after removal: Keyarchy starts no daemon, installs no
+service or timer, and grants nothing that needs revoking.
+
+## What it touches
+
+- **No network.** Keyarchy makes no HTTP requests and contacts no service. It
+  runs three programs: `hyprctl` (only when the shim is missing), its own two
+  helpers in `bin/`, and `omarchy-notification-send` to show a reminder.
+- **No elevated privilege.** No `sudo`, no `pkexec`, no systemd units, no
+  package installs, and nothing that runs at install time except the two
+  scripts you run yourself.
+- **`usage.json` is a tally of your keyboard use.** One counter per binding
+  description — not keystrokes, not text, but it does say which shortcuts you
+  press and how often. `state.json` additionally records workspace names, which
+  come from your compositor. Both are `0600` in a `0700` directory and never
+  leave the machine.
+- **It edits one file you own**: `~/.config/hypr/hyprland.lua`, to add a single
+  `require` line, with a backup taken first and an automatic rollback if
+  Hyprland reports a config error. It does not touch any other Omarchy or
+  Hyprland configuration.
 
 ## What it teaches
 
@@ -153,6 +196,21 @@ mouse / focus ─► Hyprland socket2 ─► Service.qml ─► beacon recent?
 at config time and writes `$XDG_RUNTIME_DIR/keyarchy/binds.json`, so reminders
 can say `SUPER + 5`.
 
+Those three runtime files decide whether Keyarchy stays quiet and what its
+reminders say, so it only accepts them from a runtime directory of the form
+`/run/user/<uid>`. There is deliberately no `/tmp` fallback: `/tmp/keyarchy` is
+a path another account can create first, and whoever owns that directory owns
+the answer. Without a usable runtime directory, Keyarchy stays silent — the
+same degraded mode as running without the shim.
+
+Nothing in the shell process opens those files directly. Every read goes
+through `bin/keyarchy-file`, which opens the path once with
+`O_NOFOLLOW|O_NONBLOCK`, checks on the descriptor it actually got that the
+thing it opened is a regular file this user owns, and reads at most 64 KiB
+before refusing. `FileView` is used only to watch for changes. That is what
+keeps a symlink or a FIFO planted on one of these names from redirecting a
+read or hanging `omarchy-shell`, which hosts every widget on the bar.
+
 ## Development
 
 ```bash
@@ -174,6 +232,10 @@ KeyarchyPanel.qml      the bar widget and its popup
 KeyarchyMark.qml       the mark drawn on the bar
 ShortcutRow.qml        one "action -> keystroke" line
 KeyarchyModel.js       all the logic, no QML imports, unit tested
+BoundedFile.qml        one watched file, read through the helper below
+bin/
+  keyarchy-file        descriptor-bound reader/writer for the five files
+  keyarchy-bounded     runs a command with a byte cap and a deadline
 hypr/
   keyarchy-shim.lua    the hl.bind wrapper
 test/

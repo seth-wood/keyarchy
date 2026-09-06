@@ -1,2 +1,14 @@
 node_modules/
-.cursor/skills/verify-keyarchy/artifacts/
+
+# Agent instruction trees stay out of the distributed plugin. `omarchy plugin
+# add` clones this repository verbatim into ~/.config/omarchy/plugins/, which
+# is a path coding agents auto-discover, so shipping a SKILL.md or an AGENTS.md
+# inside it is a prompt-injection surface regardless of what it says.
+.agents/
+.claude/
+.codex/
+.cursor/
+.gemini/
+AGENTS.md
+CLAUDE.md
+skills-lock.json

@@ -8,6 +8,9 @@
 
 set -euo pipefail
 
+PATH=/usr/bin:/bin
+export PATH
+
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ID="slw.keyarchy"
 PLUGIN_DEST="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
@@ -21,6 +24,20 @@ NEW_STATE="$HOME/.local/state/keyarchy"
 
 fail() { echo "keyarchy: $*" >&2; exit 1; }
 
+# Replace a file through a fresh temporary in its own directory rather than
+# with sed -i or cp, both of which write through a symlink planted on the
+# destination name.
+publish() {
+  local source=$1 dest=$2 temp
+  temp="$(mktemp -p "$(dirname -- "$dest")" ".keyarchy.XXXXXXXXXX")" || return 1
+  if ! cat -- "$source" >"$temp"; then
+    rm -f -- "$temp"
+    return 1
+  fi
+  chmod --reference="$dest" -- "$temp" 2>/dev/null || chmod 644 -- "$temp"
+  mv -f -T -- "$temp" "$dest"
+}
+
 command -v omarchy >/dev/null || fail "omarchy not found on PATH"
 [[ -f $HYPRLAND_LUA ]] || fail "missing $HYPRLAND_LUA"
 
@@ -33,26 +50,42 @@ if [[ -d $OLD_PLUGIN_DEST ]] || [[ -f $OLD_SHIM_DEST ]] \
   omarchy plugin disable "$OLD_PLUGIN_ID" >/dev/null 2>&1 || true
   rm -rf "$OLD_PLUGIN_DEST"
   rm -f "$OLD_SHIM_DEST"
-  rm -rf "${XDG_RUNTIME_DIR:-/tmp}/omarkey"
+  if [[ ${XDG_RUNTIME_DIR:-} =~ ^/run/user/[0-9]+$ ]]; then
+    rm -f -- "$XDG_RUNTIME_DIR/omarkey/binds.json" "$XDG_RUNTIME_DIR/omarkey/last-bind" \
+      "$XDG_RUNTIME_DIR/omarkey/last-workspace-intent"
+    rmdir -- "$XDG_RUNTIME_DIR/omarkey" 2>/dev/null || true
+  fi
   if [[ -d $OLD_STATE && ! -e $NEW_STATE ]]; then
     mv "$OLD_STATE" "$NEW_STATE"
     echo "keyarchy: moved lesson history to ~/.local/state/keyarchy"
   fi
   if [[ -f $SHELL_JSON ]] && grep -qF "$OLD_PLUGIN_ID" "$SHELL_JSON"; then
-    tmp="$(mktemp)"
+    tmp="$(mktemp -p "$(dirname -- "$SHELL_JSON")" ".keyarchy.XXXXXXXXXX")"
     jq --arg old "$OLD_PLUGIN_ID" --arg new "$PLUGIN_ID" '
       (.bar.layout // {}) |= with_entries(.value |= map(if .id == $old then .id = $new else . end))
       | .plugins = ((.plugins // []) | map(if .id == $old then .id = $new else . end))
-    ' "$SHELL_JSON" > "$tmp" && mv "$tmp" "$SHELL_JSON"
+    ' "$SHELL_JSON" > "$tmp" \
+      && chmod --reference="$SHELL_JSON" -- "$tmp" 2>/dev/null \
+      && mv -f -T -- "$tmp" "$SHELL_JSON"
+    rm -f -- "$tmp"
     echo "keyarchy: renamed the bar entry in shell.json"
   fi
   if grep -qF 'hypr.omarkey-shim' "$HYPRLAND_LUA"; then
-    cp "$HYPRLAND_LUA" "$HYPRLAND_LUA.bak.$(date +%s)"
-    sed -i \
+    backup="$(mktemp -p "$(dirname -- "$HYPRLAND_LUA")" "hyprland.lua.bak.$(date +%s).XXXXXX")"
+    cat -- "$HYPRLAND_LUA" >"$backup"
+    edit="$(mktemp -p "$(dirname -- "$HYPRLAND_LUA")" ".keyarchy-edit.XXXXXXXXXX")"
+    sed \
       -e 's/^-- Omarkey: wrap hl.bind/-- Keyarchy: wrap hl.bind/' \
       -e 's/hypr\.omarkey-shim/hypr.keyarchy-shim/' \
       -e 's/-- omarkey$/-- keyarchy/' \
-      "$HYPRLAND_LUA"
+      "$HYPRLAND_LUA" >"$edit"
+    if [[ "$(wc -l <"$edit")" -eq "$(wc -l <"$HYPRLAND_LUA")" ]]; then
+      publish "$edit" "$HYPRLAND_LUA"
+      echo "keyarchy: renamed the shim require in hyprland.lua (backup: $backup)"
+    else
+      echo "keyarchy: refusing to edit $HYPRLAND_LUA; the rename changed its length" >&2
+    fi
+    rm -f -- "$edit"
   fi
 fi
 

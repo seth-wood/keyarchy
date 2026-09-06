@@ -22,8 +22,10 @@ test("parses the shim's bind export, keeping the first key for a description", (
 })
 
 test("survives a corrupt binds file", () => {
-  assert.deepEqual(Model.parseShimBinds("{not json"), {})
-  assert.deepEqual(Model.parseHyprctlBinds("nope"), {})
+  // Spread first: these maps are prototype-free, so a deep-equal against an
+  // object literal compares prototypes and fails on principle.
+  assert.deepEqual({ ...Model.parseShimBinds("{not json") }, {})
+  assert.deepEqual({ ...Model.parseHyprctlBinds("nope") }, {})
 })
 
 test("hyprctl fallback drops binds it cannot describe", () => {
@@ -299,7 +301,7 @@ test("describeAction leaves an unknown action alone", () => {
 test("recordNotified stores what the panel needs to render the row", () => {
   const state = Model.emptyState()
   Model.recordNotified("close-window", 5, state, { description: "Close window" }, "SUPER + W")
-  assert.deepEqual(state.meta["close-window"], { description: "Close window", keys: "SUPER + W" })
+  assert.deepEqual({ ...state.meta["close-window"] }, { description: "Close window", keys: "SUPER + W" })
   assert.equal(state.counts["close-window"], 1)
 })
 
@@ -309,9 +311,9 @@ test("muting toggles both ways", () => {
 })
 
 test("parseCounts survives junk", () => {
-  assert.deepEqual(Model.parseCounts('{"a":1}'), { a: 1 })
-  assert.deepEqual(Model.parseCounts("nope"), {})
-  assert.deepEqual(Model.parseCounts(""), {})
+  assert.deepEqual({ ...Model.parseCounts('{"a":1}') }, { a: 1 })
+  assert.deepEqual({ ...Model.parseCounts("nope") }, {})
+  assert.deepEqual({ ...Model.parseCounts("") }, {})
 })
 
 test("requiresWorkspaceIntent only for workspace:N, never move-to-workspace", () => {
@@ -329,4 +331,111 @@ test("workspaceIntentAllows fail-closes workspace teaches without a fresh matchi
     { action: "move-to-workspace:2", category: "workspace", description: "Move window to workspace 2" },
     0, "", 1000, 1250, {}
   ), true)
+})
+
+
+// ------------------------------------------------- inputs from other writers
+
+test("runtimeStateDir refuses anything but /run/user/<uid>", () => {
+  assert.equal(Model.runtimeStateDir("/run/user/1000"), "/run/user/1000/keyarchy")
+  assert.equal(Model.runtimeStateDir("/run/user/1000/"), "/run/user/1000/keyarchy")
+  // The /tmp fallback this plugin used to accept: another account can create
+  // that directory first, and then it owns the beacon.
+  assert.equal(Model.runtimeStateDir("/tmp"), "")
+  assert.equal(Model.runtimeStateDir(""), "")
+  assert.equal(Model.runtimeStateDir(undefined), "")
+  assert.equal(Model.runtimeStateDir("/run/user/1000/../../../tmp"), "")
+  assert.equal(Model.runtimeStateDir("/run/user/1000'; touch /tmp/pwned; '"), "")
+})
+
+test("plainLabel strips what a markup-capable sink would render", () => {
+  assert.equal(Model.plainLabel("<img src=http://x/leak.png>"), "img src=http://x/leak.png")
+  assert.equal(Model.plainLabel("a & b"), "a b")
+  assert.equal(Model.plainLabel("line one" + String.fromCharCode(2) + "two"), "line one two")
+  // A bidi override makes a toast read as something other than what it says.
+  assert.equal(Model.plainLabel("safe" + String.fromCharCode(0x202e) + "gnp.exe"), "safe gnp.exe")
+  assert.equal(Model.plainLabel("x".repeat(500)).length, 120)
+})
+
+test("notifyArgument keeps a dash-leading value out of option position", () => {
+  // omarchy-notification-send parses options before and after the headline and
+  // has no "--" to stop it, so --image=... must not arrive as an argument.
+  assert.equal(Model.notifyArgument("--image=/home/me/.ssh/id_ed25519"), " --image=/home/me/.ssh/id_ed25519")
+  assert.equal(Model.notifyArgument("-g"), " -g")
+  assert.equal(Model.notifyArgument("Close window"), "Close window")
+})
+
+test("parsed maps have no prototype, so a bind named toString is not 'used'", () => {
+  const binds = Model.parseShimBinds(JSON.stringify({ toString: "SUPER + T", constructor: "SUPER + C" }))
+  const usage = Model.parseCounts("{}")
+  // On a plain object usage["toString"] is a function, which is truthy, and
+  // both of these would have counted as shortcuts the user already presses.
+  assert.deepEqual(Model.usageSummary(binds, usage), { used: 0, total: 2 })
+  assert.equal(Object.getPrototypeOf(binds), null)
+  assert.equal(Object.getPrototypeOf(usage), null)
+})
+
+test("bind exports are capped and sanitised at ingestion", () => {
+  const many = {}
+  for (let i = 0; i < 900; i++) many["bind " + i] = "SUPER + A"
+  assert.equal(Object.keys(Model.parseShimBinds(JSON.stringify(many))).length, 512)
+
+  const nasty = Model.parseShimBinds(JSON.stringify({ "<b>Close</b>": "SUPER + W" }))
+  assert.deepEqual(Object.keys(nasty), ["b Close /b"])
+})
+
+test("usage tallies stop growing instead of tracking every new description", () => {
+  let usage = Model.emptyMap()
+  for (let i = 0; i < 1100; i++) usage = Model.countUsage(usage, "bind " + i)
+  assert.equal(Object.keys(usage).length, 1000)
+
+  // An existing key still counts up after the cap is reached.
+  const before = usage["bind 0"]
+  usage = Model.countUsage(usage, "bind 0")
+  assert.equal(usage["bind 0"], before + 1)
+})
+
+test("state.json is adopted with types checked and counts bounded", () => {
+  const state = Model.parseState(JSON.stringify({
+    counts: { "close-window": "3", "bad": "not a number" },
+    lastAt: { "close-window": 1000 },
+    meta: { "close-window": { description: "<b>Close</b>", keys: "SUPER + W" } },
+    lastAnyAt: 1000
+  }))
+  assert.equal(state.counts["close-window"], 3)
+  assert.equal(state.counts["bad"], undefined)
+  assert.equal(state.meta["close-window"].description, "b Close /b")
+  assert.equal(Object.getPrototypeOf(state.counts), null)
+
+  assert.equal(Object.keys(Model.parseState("not json").counts).length, 0)
+})
+
+test("state stops tracking new actions rather than growing without bound", () => {
+  const state = Model.emptyState()
+  for (let i = 0; i < 600; i++) {
+    Model.recordNotified("workspace:" + i, 1000, state, { description: "w" }, "SUPER + 1")
+  }
+  assert.equal(Object.keys(state.counts).length, 500)
+})
+
+test("settings from shell.json are range-checked, not just copied", () => {
+  const config = Model.mergeConfig({ cooldownMs: "not a number", lifetimeCap: -5, globalGapMs: 1e12 })
+  assert.equal(config.cooldownMs, 300000)    // kept the default
+  assert.equal(config.lifetimeCap, 5)        // kept the default
+  assert.equal(config.globalGapMs, 86400000) // clamped
+  assert.equal(Model.mergeConfig({ cooldownMs: 1000 }).cooldownMs, 1000)
+})
+
+test("a workspace name reaching a notification is bounded at the door", () => {
+  const match = Model.classify("workspacev2", "7," + "x".repeat(400))
+  assert.ok(match.description.length <= "Switch to workspace ".length + 48)
+})
+
+test("panel rows are capped so a large state file cannot build an unbounded model", () => {
+  const state = Model.emptyState()
+  for (let i = 0; i < 400; i++) {
+    state.counts["workspace:" + i] = 1
+    state.lastAt["workspace:" + i] = i
+  }
+  assert.equal(Model.lessonRows(state, Model.defaultConfig()).length, 200)
 })

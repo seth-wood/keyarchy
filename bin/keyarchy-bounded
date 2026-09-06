@@ -1,0 +1,44 @@
+#!/usr/bin/bash
+# Run a command with a byte ceiling, an absolute deadline, and a process group
+# that gets cleaned up either way.
+#
+# The cap is at the producer: head closes the pipe at MAX + 1 bytes, so the
+# shell never holds the whole of a command's output, and a result longer than
+# MAX is reported as failure rather than silently truncated into shape. setsid
+# puts the command in its own session so timeout's KILL reaches descendants
+# (hyprctl's children included) instead of only the wrapper.
+#
+#   keyarchy-bounded /usr/bin/hyprctl binds -j
+
+set -uo pipefail
+
+MAX=${KEYARCHY_MAX_BYTES:-262144}
+DEADLINE=${KEYARCHY_DEADLINE_SECONDS:-10}
+
+case $MAX in '' | *[!0-9]*) MAX=262144 ;; esac
+case $DEADLINE in '' | *[!0-9]*) DEADLINE=10 ;; esac
+
+[ $# -gt 0 ] || { echo "keyarchy-bounded: no command" >&2; exit 2; }
+case $1 in /*) ;; *) echo "keyarchy-bounded: command must be an absolute path" >&2; exit 2 ;; esac
+
+# stderr is bounded separately rather than discarded: a helper that fails for a
+# reason worth reading should still not be able to fill the journal.
+out=$(
+  /usr/bin/setsid -w /usr/bin/timeout -k 2 "$DEADLINE" "$@" \
+    2> >(/usr/bin/head -c 4096 >&2) \
+    | /usr/bin/head -c $((MAX + 1))
+)
+rc=$?
+
+# Byte-exact because the caller clears the environment, so this runs in the C
+# locale where one character is one byte.
+if [ ${#out} -gt "$MAX" ]; then
+  echo "keyarchy-bounded: output exceeded $MAX bytes" >&2
+  exit 1
+fi
+
+# Checked after the length test: a producer killed by SIGPIPE once head had
+# its fill is an overflow, and should be reported as one.
+[ "$rc" -eq 0 ] || exit "$rc"
+
+printf '%s' "$out"
