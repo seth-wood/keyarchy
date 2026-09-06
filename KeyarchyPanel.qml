@@ -20,14 +20,23 @@ Panel {
   ipcTarget: "slw.keyarchy"
 
   readonly property string home: Quickshell.env("HOME")
-  readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
   readonly property string stateDir: home + "/.local/state/keyarchy"
+
+  // Same rule as the service: no /tmp fallback, and the helpers are resolved
+  // next to this file rather than found on PATH. See Service.qml.
+  readonly property string runtimeStateDir: Model.runtimeStateDir(Quickshell.env("XDG_RUNTIME_DIR"))
+  readonly property string fileHelper: Model.localPath(Qt.resolvedUrl("bin/keyarchy-file"))
+  readonly property var helperEnvironment: ({
+    "HOME": root.home,
+    "XDG_RUNTIME_DIR": Quickshell.env("XDG_RUNTIME_DIR") || "",
+    "PATH": "/usr/bin"
+  })
 
   readonly property var config: Model.mergeConfig(settings)
   readonly property bool enabled: config.enabled
 
-  property var binds: ({})
-  property var usage: ({})
+  property var binds: Model.emptyMap()
+  property var usage: Model.emptyMap()
   property var state: Model.emptyState()
   property int unusedOffset: 0
 
@@ -80,48 +89,49 @@ Panel {
   // The service watches this file, so clearing it takes effect immediately
   // rather than waiting for a shell restart.
   function resetProgress() {
-    stateFile.setText(JSON.stringify({ version: 2, counts: {}, lastAt: {}, meta: {}, lastAnyAt: 0 }, null, 2) + "\n")
     root.state = Model.emptyState()
+    stateFile.write(JSON.stringify(Model.serializeState(root.state), null, 2) + "\n")
   }
 
-  FileView {
+  // Read through the same descriptor-bound helper the service uses; the
+  // FileView inside each of these only watches. See BoundedFile.qml.
+  BoundedFile {
     id: bindsFile
-    path: root.runtimeDir + "/keyarchy/binds.json"
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.binds = Model.parseShimBinds(text())
-    onFileChanged: reload()
+    helper: root.fileHelper
+    environment: root.helperEnvironment
+    rootName: "runtime"
+    fileName: "binds.json"
+    active: root.runtimeStateDir !== ""
+    watchPath: root.runtimeStateDir === "" ? "" : root.runtimeStateDir + "/binds.json"
+    onLoaded: function(text) { root.binds = Model.parseShimBinds(text) }
   }
 
-  FileView {
+  BoundedFile {
     id: usageFile
-    path: root.stateDir + "/usage.json"
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.usage = Model.parseCounts(text())
-    onFileChanged: reload()
+    helper: root.fileHelper
+    environment: root.helperEnvironment
+    rootName: "state"
+    fileName: "usage.json"
+    watchPath: root.stateDir + "/usage.json"
+    onLoaded: function(text) { root.usage = Model.parseCounts(text) }
   }
 
-  FileView {
+  BoundedFile {
     id: stateFile
-    path: root.stateDir + "/state.json"
-    watchChanges: true
-    atomicWrites: true
-    printErrors: false
-    onLoaded: {
-      var next = Model.emptyState()
-      try {
-        var parsed = JSON.parse(text() || "{}") || {}
-        if (parsed.counts) next.counts = parsed.counts
-        if (parsed.lastAt) next.lastAt = parsed.lastAt
-        if (parsed.meta) next.meta = parsed.meta
-        if (parsed.lastAnyAt) next.lastAnyAt = Number(parsed.lastAnyAt) || 0
-      } catch (error) {
-        // Nothing to show is the right answer for an unreadable history.
-      }
-      root.state = next
-    }
-    onFileChanged: reload()
+    helper: root.fileHelper
+    environment: root.helperEnvironment
+    rootName: "state"
+    fileName: "state.json"
+    watchPath: root.stateDir + "/state.json"
+    // Nothing to show is the right answer for an unreadable history, but a
+    // refused read must not look like an empty one, so failed() is silent.
+    onLoaded: function(text) { root.state = Model.parseState(text) }
+  }
+
+  Component.onCompleted: {
+    bindsFile.reload()
+    usageFile.reload()
+    stateFile.reload()
   }
 
   // Without these the widget occupies a zero-width slot and renders nothing.

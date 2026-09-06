@@ -45,6 +45,66 @@ var APP_CLASSES = {
   "1password": "Passwords"
 }
 
+// Everything below this line arrives from something Keyarchy does not
+// control: the shim's export, a Hyprland event, a state file another process
+// can write. So it is all capped, and none of it is trusted to be short.
+var MAX_LABEL = 120          // one description or key string
+var MAX_BINDS = 512          // entries taken from a binds export
+var MAX_LESSONS = 200        // rows the panel will build from state.json
+var MAX_TRACKED_ACTIONS = 500 // actions state.json will keep counts for
+var MAX_USAGE_KEYS = 1000    // distinct descriptions usage.json will tally
+
+// C0, DEL, C1 and the bidi overrides. Stripped rather than escaped: none of
+// them mean anything in a key name, and a bidi override in a notification
+// makes the toast read as something other than what it says.
+var CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g
+
+// The shell renders tooltips, notification bodies and panel headers with
+// components a plugin cannot pin to PlainText, and Qt promotes anything that
+// looks like markup to rich text -- which then loads <img src=...> from
+// inside the shell process. Keyarchy's own Text elements are all PlainText,
+// so this is for the sinks it hands strings to rather than owns.
+var MARKUP_CHARS = /[<>&]/g
+
+// A map with no prototype. Every one of these is keyed by a string from a
+// file some other process writes, and on a plain object "toString" or
+// "constructor" would read back as an inherited function rather than as a
+// missing entry.
+function emptyMap() {
+  return Object.create(null)
+}
+
+function plainLabel(text, max) {
+  var limit = Number(max) > 0 ? Number(max) : MAX_LABEL
+  var value = String(text === undefined || text === null ? "" : text)
+  value = value.replace(CONTROL_CHARS, " ").replace(MARKUP_CHARS, " ")
+  value = value.replace(/\s+/g, " ").trim()
+  return value.length > limit ? value.slice(0, limit) : value
+}
+
+// omarchy-notification-send parses options both before the headline and after
+// it, and it has no "--" to end that. Nothing Keyarchy sends starts with a
+// dash today, but the values come from a file, so a leading space keeps a
+// dash-leading string out of option position without dropping what it says.
+function notifyArgument(text) {
+  var value = plainLabel(text, MAX_LABEL)
+  return value.charAt(0) === "-" ? " " + value : value
+}
+
+// The runtime directory, or "" when Keyarchy should stay quiet. There is no
+// /tmp fallback: a runtime path another account can pre-create is a runtime
+// path another account owns, and the beacon that arrives through it decides
+// what the notification says.
+function runtimeStateDir(value) {
+  var dir = String(value || "").replace(/\/+$/, "")
+  return /^\/run\/user\/[0-9]+$/.test(dir) ? dir + "/keyarchy" : ""
+}
+
+// file:///a/b -> /a/b, for resolving a helper next to this plugin's QML.
+function localPath(url) {
+  return String(url || "").replace(/^file:\/\//, "")
+}
+
 var CATEGORY_OF_ACTION = {
   "workspace": "workspace",
   "move-to-workspace": "workspace",
@@ -80,14 +140,25 @@ function mergeConfig(overrides) {
   var config = defaultConfig()
   if (!overrides || typeof overrides !== "object") return config
 
+  // Timings are numbers with a sane range, not "whatever the file said". A
+  // string or a NaN here would make every comparison below false and turn the
+  // cooldown off altogether.
+  var LIMITS = { cooldownMs: 86400000, globalGapMs: 86400000, lifetimeCap: 1000 }
   for (var key in config) {
     if (key === "categories" || key === "muted") continue
-    if (overrides[key] !== undefined && overrides[key] !== null) config[key] = overrides[key]
+    var value = overrides[key]
+    if (value === undefined || value === null) continue
+    if (key === "enabled") { config[key] = !!value; continue }
+    var number = Number(value)
+    if (!isFinite(number) || number < 0) continue
+    config[key] = Math.min(Math.floor(number), LIMITS[key])
   }
 
   if (Array.isArray(overrides.muted)) {
     var muted = []
-    for (var i = 0; i < overrides.muted.length; i++) muted.push(String(overrides.muted[i]))
+    for (var i = 0; i < overrides.muted.length && i < MAX_TRACKED_ACTIONS; i++) {
+      muted.push(plainLabel(overrides.muted[i], MAX_LABEL))
+    }
     config.muted = muted
   }
 
@@ -103,7 +174,34 @@ function mergeConfig(overrides) {
 }
 
 function emptyState() {
-  return { counts: {}, lastAt: {}, meta: {}, lastAnyAt: 0 }
+  return { counts: emptyMap(), lastAt: emptyMap(), meta: emptyMap(), lastAnyAt: 0 }
+}
+
+// Copy a parsed JSON object into a prototype-free map, dropping anything that
+// is not a plain own key and stopping at `limit` entries rather than growing
+// to whatever the file on disk asked for.
+function adoptMap(source, limit, coerce) {
+  var map = emptyMap()
+  if (!source || typeof source !== "object") return map
+
+  var count = 0
+  for (var key in source) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue
+    if (count >= limit) break
+    var label = plainLabel(key, MAX_LABEL)
+    if (label === "") continue
+    var value = coerce ? coerce(source[key]) : source[key]
+    if (value === null) continue
+    map[label] = value
+    count++
+  }
+  return map
+}
+
+function finiteCount(value) {
+  var number = Number(value)
+  if (!isFinite(number) || number < 0) return null
+  return Math.floor(number)
 }
 
 // "code:12" -> "3", "LEFT" -> "left arrow glyph", anything else uppercased.
@@ -158,13 +256,21 @@ function parseShimBinds(text) {
   try {
     raw = JSON.parse(String(text || "{}")) || {}
   } catch (error) {
-    return {}
+    return emptyMap()
   }
+  if (typeof raw !== "object") return emptyMap()
 
-  var binds = {}
+  var binds = emptyMap()
+  var count = 0
   for (var description in raw) {
-    var keys = formatKeyString(raw[description])
-    if (keys !== "") binds[description] = keys
+    if (!Object.prototype.hasOwnProperty.call(raw, description)) continue
+    if (count >= MAX_BINDS) break
+    var label = plainLabel(description, MAX_LABEL)
+    var keys = plainLabel(formatKeyString(raw[description]), MAX_LABEL)
+    if (label === "" || keys === "") continue
+    if (binds[label] !== undefined) continue
+    binds[label] = keys
+    count++
   }
   return binds
 }
@@ -174,19 +280,22 @@ function parseHyprctlBinds(text) {
   try {
     list = JSON.parse(String(text || "[]")) || []
   } catch (error) {
-    return {}
+    return emptyMap()
   }
-  if (!Array.isArray(list)) return {}
+  if (!Array.isArray(list)) return emptyMap()
 
-  var binds = {}
-  for (var i = 0; i < list.length; i++) {
+  var binds = emptyMap()
+  var count = 0
+  for (var i = 0; i < list.length && count < MAX_BINDS; i++) {
     var bind = list[i] || {}
-    var description = String(bind.description || "")
+    var description = plainLabel(bind.description, MAX_LABEL)
     if (description === "" || bind.mouse || String(bind.submap || "") !== "") continue
-    if (binds[description]) continue
+    if (binds[description] !== undefined) continue
 
-    var keys = formatBind(bind)
-    if (keys !== "") binds[description] = keys
+    var keys = plainLabel(formatBind(bind), MAX_LABEL)
+    if (keys === "") continue
+    binds[description] = keys
+    count++
   }
   return binds
 }
@@ -210,7 +319,9 @@ function classify(name, data) {
 
   switch (String(name || "")) {
     case "workspacev2":
-      var workspace = fields[1] || fields[0] || ""
+      // A workspace name is whatever a client last called it, and it ends up
+      // in a notification summary, so it is bounded here at the door.
+      var workspace = plainLabel(fields[1] || fields[0] || "", 48)
       if (workspace === "") return null
       return {
         action: "workspace:" + workspace,
@@ -219,7 +330,7 @@ function classify(name, data) {
       }
 
     case "movewindowv2":
-      var target = fields[2] || fields[1] || ""
+      var target = plainLabel(fields[2] || fields[1] || "", 48)
       if (target === "") return null
       return {
         action: "move-to-workspace:" + target,
@@ -355,6 +466,14 @@ function shouldNotify(action, now, state, config) {
 }
 
 function recordNotified(action, now, state, match, keys) {
+  // Fail closed rather than tracking an unbounded number of actions: the
+  // actions are Keyarchy's own vocabulary plus a workspace name, and a name
+  // per switch would otherwise grow state.json forever.
+  if (state.counts[action] === undefined) {
+    var tracked = 0
+    for (var key in state.counts) tracked++
+    if (tracked >= MAX_TRACKED_ACTIONS) return state
+  }
   state.counts[action] = (state.counts[action] || 0) + 1
   state.lastAt[action] = now
   state.lastAnyAt = now
@@ -367,9 +486,60 @@ function recordNotified(action, now, state, match, keys) {
 function parseCounts(text) {
   try {
     var parsed = JSON.parse(String(text || "{}"))
-    return parsed && typeof parsed === "object" ? parsed : {}
+    return adoptMap(parsed, MAX_USAGE_KEYS, finiteCount)
   } catch (error) {
-    return {}
+    return emptyMap()
+  }
+}
+
+// One more activation of `description`, refusing to grow past MAX_USAGE_KEYS
+// so a session that sees a new description every time cannot grow the tally
+// without bound in a process that stays loaded for days.
+function countUsage(usage, description) {
+  var label = plainLabel(description, MAX_LABEL)
+  var next = emptyMap()
+  var count = 0
+  for (var key in usage) {
+    next[key] = usage[key]
+    count++
+  }
+  if (label === "") return next
+  if (next[label] === undefined && count >= MAX_USAGE_KEYS) return next
+  next[label] = (next[label] || 0) + 1
+  return next
+}
+
+// The three maps in state.json, adopted the same way the usage tally is.
+function parseState(text) {
+  var next = emptyState()
+  var parsed = null
+  try {
+    parsed = JSON.parse(String(text || "{}"))
+  } catch (error) {
+    // A corrupt state file only costs the nag history; start over.
+    return next
+  }
+  if (!parsed || typeof parsed !== "object") return next
+
+  next.counts = adoptMap(parsed.counts, MAX_TRACKED_ACTIONS, finiteCount)
+  next.lastAt = adoptMap(parsed.lastAt, MAX_TRACKED_ACTIONS, finiteCount)
+  next.meta = adoptMap(parsed.meta, MAX_TRACKED_ACTIONS, function(value) {
+    if (!value || typeof value !== "object") return null
+    return { description: plainLabel(value.description, MAX_LABEL), keys: plainLabel(value.keys, MAX_LABEL) }
+  })
+  next.lastAnyAt = finiteCount(parsed.lastAnyAt) || 0
+  return next
+}
+
+// What persistState writes back. Plain objects, because JSON.stringify walks
+// a null-prototype map fine but the shell's own config writer does not.
+function serializeState(state) {
+  return {
+    version: 2,
+    counts: state.counts,
+    lastAt: state.lastAt,
+    meta: state.meta,
+    lastAnyAt: state.lastAnyAt || 0
   }
 }
 
@@ -450,7 +620,7 @@ function lessonRows(state, config) {
   }
 
   rows.sort(function(a, b) { return b.lastAt - a.lastAt })
-  return rows
+  return rows.length > MAX_LESSONS ? rows.slice(0, MAX_LESSONS) : rows
 }
 
 // Toggling one entry of the muted list, returned as a new array so the caller
@@ -532,6 +702,15 @@ function compositorOwnsAction(match, focus) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    emptyMap: emptyMap,
+    plainLabel: plainLabel,
+    notifyArgument: notifyArgument,
+    runtimeStateDir: runtimeStateDir,
+    localPath: localPath,
+    adoptMap: adoptMap,
+    countUsage: countUsage,
+    parseState: parseState,
+    serializeState: serializeState,
     defaultConfig: defaultConfig,
     mergeConfig: mergeConfig,
     emptyState: emptyState,

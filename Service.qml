@@ -20,13 +20,27 @@ Item {
   property var manifest: null
 
   readonly property string home: Quickshell.env("HOME")
-  readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
   readonly property string stateDir: home + "/.local/state/keyarchy"
-  readonly property string statePath: stateDir + "/state.json"
-  readonly property string usagePath: stateDir + "/usage.json"
-  readonly property string beaconPath: runtimeDir + "/keyarchy/last-bind"
-  readonly property string workspaceIntentPath: runtimeDir + "/keyarchy/last-workspace-intent"
-  readonly property string bindsPath: runtimeDir + "/keyarchy/binds.json"
+
+  // "" when XDG_RUNTIME_DIR is not /run/user/<uid>. There is deliberately no
+  // /tmp fallback: those three files decide whether Keyarchy stays quiet and
+  // what its notifications say, and a path another account can create first
+  // is a path another account owns. Without them Keyarchy goes silent, which
+  // is the same degraded mode as running without the shim.
+  readonly property string runtimeStateDir: Model.runtimeStateDir(Quickshell.env("XDG_RUNTIME_DIR"))
+
+  // Helpers ship next to this file, so they are resolved relative to it
+  // rather than found on a PATH another process can prepend to.
+  readonly property string fileHelper: Model.localPath(Qt.resolvedUrl("bin/keyarchy-file"))
+  readonly property string boundedHelper: Model.localPath(Qt.resolvedUrl("bin/keyarchy-bounded"))
+
+  // Every helper runs with a cleared environment and exactly what it needs,
+  // so nothing inherited (PATH, PYTHONPATH, BASH_ENV) decides what runs.
+  readonly property var helperEnvironment: ({
+    "HOME": root.home,
+    "XDG_RUNTIME_DIR": Quickshell.env("XDG_RUNTIME_DIR") || "",
+    "PATH": "/usr/bin"
+  })
 
   readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "slw.keyarchy"
 
@@ -59,7 +73,7 @@ Item {
 
   // Only used when the shim has not written binds.json -- see refreshBinds().
   property bool shimBindsLoaded: false
-  property var binds: ({})
+  property var binds: Model.emptyMap()
   property var state: Model.emptyState()
   property real lastBeaconAt: 0
   property string lastBeaconDescription: ""
@@ -71,7 +85,7 @@ Item {
   // Which bindings you actually press, counted by description. The beacon
   // already names the bind that fired, so this needs nothing extra from the
   // shim -- every activation passes through here anyway.
-  property var usage: ({})
+  property var usage: Model.emptyMap()
   property bool usageDirty: false
 
   // Last activewindow class/title. fullscreen>>1 carries no address, so this
@@ -96,22 +110,30 @@ Item {
 
     root.binds = parsed
     root.shimBindsLoaded = true
+    console.log("keyarchy binds-loaded count=" + count)
   }
 
   function loadUsage(text) {
     root.usage = Model.parseCounts(text)
   }
 
+  // A refused read is not an empty file. Keeping what is already in memory
+  // means a planted symlink or an oversized state file costs a refresh, not
+  // the lesson history.
+  function readRefused(what) {
+    console.warn("keyarchy: refused to read " + what)
+  }
+
   // Remember what the keyboard just claimed, for suppression. Counting usage
   // is separate so a shell restart does not re-tally the leftover beacon file.
   function noteBeacon(text) {
-    var description = String(text || "").split("\n")[0]
+    var description = Model.plainLabel(String(text || "").split("\n")[0])
     root.lastBeaconDescription = description
     return description
   }
 
   function noteWorkspaceIntent(text) {
-    var action = String(text || "").split("\n")[0]
+    var action = Model.plainLabel(String(text || "").split("\n")[0])
     root.lastWorkspaceIntentAction = action
     return action
   }
@@ -119,11 +141,7 @@ Item {
   function countUsage(description) {
     if (description === "") return
 
-    var next = ({})
-    for (var key in root.usage) next[key] = root.usage[key]
-    next[description] = (next[description] || 0) + 1
-
-    root.usage = next
+    root.usage = Model.countUsage(root.usage, description)
     root.usageDirty = true
     usagePersistTimer.restart()
   }
@@ -133,31 +151,15 @@ Item {
   function persistUsage() {
     if (!root.usageDirty) return
     root.usageDirty = false
-    usageFile.setText(JSON.stringify(root.usage, null, 2) + "\n")
+    usageFile.write(JSON.stringify(root.usage, null, 2) + "\n")
   }
 
   function loadState(text) {
-    var next = Model.emptyState()
-    try {
-      var parsed = JSON.parse(String(text || "{}")) || {}
-      if (parsed.counts) next.counts = parsed.counts
-      if (parsed.lastAt) next.lastAt = parsed.lastAt
-      if (parsed.meta) next.meta = parsed.meta
-      if (parsed.lastAnyAt) next.lastAnyAt = Number(parsed.lastAnyAt) || 0
-    } catch (error) {
-      // A corrupt state file only costs us the nag history; start over.
-    }
-    root.state = next
+    root.state = Model.parseState(text)
   }
 
   function persistState() {
-    stateFile.setText(JSON.stringify({
-      version: 2,
-      counts: root.state.counts,
-      lastAt: root.state.lastAt,
-      meta: root.state.meta,
-      lastAnyAt: root.state.lastAnyAt || 0
-    }, null, 2) + "\n")
+    stateFile.write(JSON.stringify(Model.serializeState(root.state), null, 2) + "\n")
   }
 
   function onHyprlandEvent(name, data) {
@@ -207,18 +209,36 @@ Item {
     if (!Model.shouldNotify(match.action, now, root.state, root.settings)) return
 
     var keys = Model.keysForAction(match, root.binds)
-    if (!keys) return
+    if (!keys) {
+      // Worth saying out loud: this is the difference between "Keyarchy is
+      // quiet because you used the keyboard" and "Keyarchy has no idea what
+      // the shortcut is", and they look identical from outside.
+      console.warn("keyarchy: no bind known for " + match.action + " (" + match.description + ")")
+      return
+    }
 
-    console.log("keyarchy teach " + match.action + " -> " + keys)
+    // Both of these came from outside: the description carries a workspace
+    // name any client can set, and the keys come out of the shim's export.
+    // The notification daemon renders summary and body with components this
+    // plugin cannot pin to PlainText, so markup and controls come out here,
+    // and notifyArgument keeps a dash-leading value out of option position --
+    // omarchy-notification-send parses options on both sides of the headline
+    // and has no "--" to stop it.
+    var summary = Model.notifyArgument(match.description)
+    var body = Model.notifyArgument(keys)
+    if (summary === "") return
+
+    console.log("keyarchy teach " + match.action)
 
     notifyProcess.command = [
-      "omarchy-notification-send",
+      "/usr/bin/omarchy-notification-send",
       "-u", "low",
       "-g", "󰌌",
-      match.description,
-      keys
+      summary,
+      body
     ]
     notifyProcess.running = true
+    notifyDeadline.restart()
 
     Model.recordNotified(match.action, now, root.state, match, keys)
     persistState()
@@ -232,58 +252,70 @@ Item {
     hyprctlBinds.running = true
   }
 
-  FileView {
+  // Every one of these is a file some other process writes, so none of them
+  // is read by the shell process itself -- see BoundedFile.qml.
+  BoundedFile {
     id: bindsFile
-    path: root.bindsPath
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.loadBinds(text())
-    onLoadFailed: root.refreshBinds()
-    onFileChanged: reload()
+    helper: root.fileHelper
+    environment: root.helperEnvironment
+    rootName: "runtime"
+    fileName: "binds.json"
+    active: root.runtimeStateDir !== ""
+    watchPath: root.runtimeStateDir === "" ? "" : root.runtimeStateDir + "/binds.json"
+    onLoaded: function(text) {
+      if (text === "") root.refreshBinds()
+      else root.loadBinds(text)
+    }
+    onFailed: root.readRefused("binds.json")
   }
 
-  FileView {
+  BoundedFile {
     id: beaconFile
-    path: root.beaconPath
-    watchChanges: true
-    printErrors: false
-    onFileChanged: {
-      // Timestamp first: suppression must not wait on the async read.
+    helper: root.fileHelper
+    environment: root.helperEnvironment
+    rootName: "runtime"
+    fileName: "last-bind"
+    active: root.runtimeStateDir !== ""
+    watchPath: root.runtimeStateDir === "" ? "" : root.runtimeStateDir + "/last-bind"
+    // Timestamp on the watch event, not on the read: suppression is a race
+    // against the Hyprland event and must not wait for a helper to start.
+    onWatchFired: {
       root.lastBeaconAt = Date.now()
       root.countNextBeacon = true
-      reload()
     }
-    onLoaded: {
-      var description = root.noteBeacon(text())
-      // Only tally activations that triggered a watch event — not the leftover
-      // file read on service start.
+    onLoaded: function(text) {
+      var description = root.noteBeacon(text)
+      // Only tally activations that triggered a watch event -- not the
+      // leftover file read on service start.
       if (root.countNextBeacon) {
         root.countNextBeacon = false
         root.countUsage(description)
       }
     }
+    onFailed: root.readRefused("last-bind")
   }
 
-  FileView {
+  BoundedFile {
     id: workspaceIntentFile
-    path: root.workspaceIntentPath
-    watchChanges: true
-    printErrors: false
-    onFileChanged: {
-      root.lastWorkspaceIntentAt = Date.now()
-      reload()
-    }
-    onLoaded: root.noteWorkspaceIntent(text())
+    helper: root.fileHelper
+    environment: root.helperEnvironment
+    rootName: "runtime"
+    fileName: "last-workspace-intent"
+    active: root.runtimeStateDir !== ""
+    watchPath: root.runtimeStateDir === "" ? "" : root.runtimeStateDir + "/last-workspace-intent"
+    onWatchFired: root.lastWorkspaceIntentAt = Date.now()
+    onLoaded: function(text) { root.noteWorkspaceIntent(text) }
+    onFailed: root.readRefused("last-workspace-intent")
   }
 
-  FileView {
+  BoundedFile {
     id: usageFile
-    path: root.usagePath
-    watchChanges: false
-    atomicWrites: true
-    printErrors: false
-    onLoaded: root.loadUsage(text())
-    onLoadFailed: root.loadUsage("{}")
+    helper: root.fileHelper
+    environment: root.helperEnvironment
+    rootName: "state"
+    fileName: "usage.json"
+    onLoaded: function(text) { root.loadUsage(text) }
+    onFailed: root.readRefused("usage.json")
   }
 
   Timer {
@@ -293,35 +325,57 @@ Item {
     onTriggered: root.persistUsage()
   }
 
-  FileView {
+  BoundedFile {
     id: stateFile
-    path: root.statePath
-    watchChanges: true
-    atomicWrites: true
-    printErrors: false
-    onLoaded: root.loadState(text())
-    onLoadFailed: root.loadState("{}")
+    helper: root.fileHelper
+    environment: root.helperEnvironment
+    rootName: "state"
+    fileName: "state.json"
     // The panel resets progress by rewriting this file; pick that up live
     // instead of holding stale counts until the next shell restart.
-    onFileChanged: reload()
+    watchPath: root.stateDir + "/state.json"
+    onLoaded: function(text) { root.loadState(text) }
+    onFailed: root.readRefused("state.json")
   }
 
+  // Degraded-mode fallback, and the only command Keyarchy runs. It goes
+  // through keyarchy-bounded, which caps the output at the producer and kills
+  // the whole process group on the deadline -- hyprctl's output is not large
+  // today, but it is not this plugin's to promise.
   Process {
     id: hyprctlBinds
-    command: ["hyprctl", "binds", "-j"]
-    stdout: StdioCollector {
-      onStreamFinished: {
-        if (root.shimBindsLoaded) return
-        root.binds = Model.parseHyprctlBinds(text)
+    command: ["/usr/bin/bash", root.boundedHelper, "/usr/bin/hyprctl", "binds", "-j"]
+    clearEnvironment: true
+    environment: root.helperEnvironment
+
+    property string buffer: ""
+
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        if (hyprctlBinds.buffer.length + chunk.length > 262144) {
+          hyprctlBinds.buffer = ""
+          hyprctlBinds.signal(15)
+          return
+        }
+        hyprctlBinds.buffer += chunk
       }
+    }
+
+    onExited: function(code, status) {
+      var text = hyprctlBinds.buffer
+      hyprctlBinds.buffer = ""
+      if (code !== 0 || root.shimBindsLoaded) return
+      root.binds = Model.parseHyprctlBinds(text)
     }
   }
 
   Process { id: notifyProcess }
 
-  Process {
-    id: ensureStateDir
-    command: ["mkdir", "-p", root.stateDir]
+  Timer {
+    id: notifyDeadline
+    interval: 5000
+    onTriggered: if (notifyProcess.running) notifyProcess.signal(9)
   }
 
   Timer {
@@ -339,17 +393,26 @@ Item {
   }
 
   Component.onCompleted: {
-    ensureStateDir.running = true
-
     // Quickshell connects the Hyprland event socket lazily, on first use of the
     // singleton's state. A bare Connections block is not "use", so without this
     // touch rawEvent never fires for a headless service.
     var connected = Hyprland.workspaces !== null
 
+    if (root.runtimeStateDir === "") {
+      console.warn("keyarchy: XDG_RUNTIME_DIR is not /run/user/<uid>; staying silent")
+    }
+
     bindsFile.reload()
     stateFile.reload()
     usageFile.reload()
-    refreshBinds()
+    if (root.runtimeStateDir === "") refreshBinds()
     console.log("keyarchy service-ready id=" + root.pluginId + " hyprland=" + connected)
+  }
+
+  // The shell outlives any one plugin, so nothing Keyarchy started may outlive
+  // Keyarchy.
+  Component.onDestruction: {
+    if (hyprctlBinds.running) hyprctlBinds.signal(9)
+    if (notifyProcess.running) notifyProcess.signal(9)
   }
 }

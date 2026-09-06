@@ -15,15 +15,44 @@ local function check(label, ok)
   end
 end
 
-local temp_dir = os.getenv("TMPDIR") or "/tmp"
-temp_dir = temp_dir .. "/keyarchy-shim-test-" .. tostring(os.time())
-os.execute("mkdir -p '" .. temp_dir .. "'")
-os.getenv = (function(original)
-  return function(name)
-    if name == "XDG_RUNTIME_DIR" then return temp_dir end
-    return original(name)
+-- The shim only accepts /run/user/<uid> as a runtime directory, so these tests
+-- run against the real one rather than a directory under /tmp -- which is the
+-- point: /tmp is a path another account can create first. The three files it
+-- writes are snapshotted and put back, so running the tests on a live desktop
+-- does not cost you the beacon state the running shell is watching.
+local temp_dir = os.getenv("XDG_RUNTIME_DIR")
+if temp_dir == nil or temp_dir:match("^/run/user/%d+$") == nil then
+  print("SKIP no /run/user/<uid> runtime directory; run this inside a user session")
+  os.exit(0)
+end
+
+local managed = { "/keyarchy/binds.json", "/keyarchy/last-bind", "/keyarchy/last-workspace-intent" }
+local saved = {}
+
+local function slurp(path)
+  local file = io.open(path, "r")
+  if not file then return nil end
+  local contents = file:read("*a")
+  file:close()
+  return contents
+end
+
+for _, name in ipairs(managed) do saved[name] = slurp(temp_dir .. name) end
+
+local function restore()
+  for _, name in ipairs(managed) do
+    local path = temp_dir .. name
+    if saved[name] == nil then
+      os.remove(path)
+    else
+      local file = io.open(path, "w")
+      if file then
+        file:write(saved[name])
+        file:close()
+      end
+    end
   end
-end)(os.getenv)
+end
 
 local dispatched = {}
 local registered = {}
@@ -139,7 +168,42 @@ local upgrade_d = hl.dsp.focus({ workspace = 9 })
 hl.dispatch(upgrade_d)
 check("upgrade reload intent wrap writes the intent file", read_file(intent_path) == "workspace:9\n")
 
-os.execute("rm -rf '" .. temp_dir .. "'")
+-- The runtime directory rule itself: a /tmp fallback is what let another
+-- account own the beacon, so it has to stay refused.
+local shim = dofile(shim_path)
+check("refuses /tmp as a runtime directory", shim.validated_runtime_dir ~= nil and (function()
+  local original = os.getenv
+  os.getenv = function(name) if name == "XDG_RUNTIME_DIR" then return "/tmp" end return original(name) end
+  local result = shim.validated_runtime_dir()
+  os.getenv = original
+  return result == nil
+end)())
+check("refuses an unset runtime directory", (function()
+  local original = os.getenv
+  os.getenv = function(name) if name == "XDG_RUNTIME_DIR" then return nil end return original(name) end
+  local result = shim.validated_runtime_dir()
+  os.getenv = original
+  return result == nil
+end)())
+check("refuses a runtime directory carrying shell metacharacters", (function()
+  local original = os.getenv
+  os.getenv = function(name)
+    if name == "XDG_RUNTIME_DIR" then return "/run/user/1000'; touch /tmp/pwned; '" end
+    return original(name)
+  end
+  local result = shim.validated_runtime_dir()
+  os.getenv = original
+  return result == nil
+end)())
+check("accepts /run/user/<uid>", (function()
+  local original = os.getenv
+  os.getenv = function(name) if name == "XDG_RUNTIME_DIR" then return "/run/user/1000/" end return original(name) end
+  local result = shim.validated_runtime_dir()
+  os.getenv = original
+  return result == "/run/user/1000"
+end)())
+
+restore()
 
 if failures > 0 then
   print(failures .. " failing")
