@@ -203,6 +203,24 @@ check("accepts /run/user/<uid>", (function()
   return result == "/run/user/1000"
 end)())
 
+-- Hyprland 0.56+ sandboxes Lua so os.execute exists as a function but always
+-- returns nil without running. The shim must still enable writes and produce
+-- binds.json, otherwise the panel never leaves "waiting for the shim".
+local sandboxed = function()
+  os.remove(temp_dir .. "/keyarchy/binds.json")
+  local original_execute = os.execute
+  os.execute = function() return nil end
+  _G.hl.bind = original_bind
+  _G.__keyarchy_binds = {}
+  _G.__keyarchy_seen = {}
+  dofile(shim_path)
+  _G.hl.bind("SUPER + Y", "descriptor-sandbox", { description = "Sandbox probe" })
+  os.execute = original_execute
+  local written = read_file(temp_dir .. "/keyarchy/binds.json")
+  return written ~= nil and written:find("Sandbox probe") ~= nil
+end
+check("writes binds.json when os.execute is sandboxed (Hyprland 0.56+)", sandboxed())
+
 restore()
 
 if failures > 0 then
