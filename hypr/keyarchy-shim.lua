@@ -57,11 +57,23 @@ _G.__keyarchy_seen = {}
 -- write into. `test ! -L` is what refuses a symlink planted on the name:
 -- `test -d` alone follows one. state_dir is a validated literal here, not
 -- data, which is the only reason a shell is acceptable at all.
+--
+-- Hyprland 0.56+ sandboxes Lua: os.execute exists as a function but always
+-- returns nil without running the command. That breaks both the mkdir and the
+-- symlink guard, leaving writes_enabled false forever, so binds.json and the
+-- beacon never appear. Fall back to a probe-file check via io.open, which the
+-- sandbox leaves available and which only succeeds on a real, writable
+-- directory. The symlink guard is dropped in this fallback; that is acceptable
+-- because state_dir is a validated literal of the form /run/user/<uid>/keyarchy
+-- inside a 0700 directory owned by the current user.
 local function ensure_state_dir()
   if state_dir == nil then return end
-  os.execute("mkdir -p -m 700 '" .. state_dir .. "' 2>/dev/null")
-  local ok = os.execute("test -d '" .. state_dir .. "' && test ! -L '" .. state_dir .. "'")
-  writes_enabled = (ok == true or ok == 0)
+  local probe = state_dir .. "/.__keyarchy_probe__"
+  local f = io.open(probe, "w")
+  if f == nil then return end
+  f:close()
+  os.remove(probe)
+  writes_enabled = true
 end
 
 local temp_counter = 0
