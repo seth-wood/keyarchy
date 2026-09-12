@@ -50,14 +50,20 @@ if [[ -d $OLD_PLUGIN_DEST ]] || [[ -f $OLD_SHIM_DEST ]] \
   omarchy plugin disable "$OLD_PLUGIN_ID" >/dev/null 2>&1 || true
   rm -rf "$OLD_PLUGIN_DEST"
   rm -f "$OLD_SHIM_DEST"
-  if [[ ${XDG_RUNTIME_DIR:-} =~ ^/run/user/[0-9]+$ ]]; then
-    rm -f -- "$XDG_RUNTIME_DIR/omarkey/binds.json" "$XDG_RUNTIME_DIR/omarkey/last-bind" \
-      "$XDG_RUNTIME_DIR/omarkey/last-workspace-intent"
-    rmdir -- "$XDG_RUNTIME_DIR/omarkey" 2>/dev/null || true
+  if [[ ${XDG_RUNTIME_DIR:-} =~ ^/run/user/[0-9]+/?$ ]]; then
+    runtime="${XDG_RUNTIME_DIR%/}"
+    rm -f -- "$runtime/omarkey/binds.json" "$runtime/omarkey/last-bind" \
+      "$runtime/omarkey/last-workspace-intent"
+    rmdir -- "$runtime/omarkey" 2>/dev/null || true
   fi
-  if [[ -d $OLD_STATE && ! -e $NEW_STATE ]]; then
-    mv "$OLD_STATE" "$NEW_STATE"
-    echo "keyarchy: moved lesson history to ~/.local/state/keyarchy"
+  if [[ -d $OLD_STATE ]]; then
+    if [[ ! -e $NEW_STATE ]]; then
+      mv "$OLD_STATE" "$NEW_STATE"
+      echo "keyarchy: moved lesson history to ~/.local/state/keyarchy"
+    else
+      rm -rf "$OLD_STATE"
+      echo "keyarchy: removed leftover ~/.local/state/omarkey (keyarchy state already present)"
+    fi
   fi
   if [[ -f $SHELL_JSON ]] && grep -qF "$OLD_PLUGIN_ID" "$SHELL_JSON"; then
     tmp="$(mktemp -p "$(dirname -- "$SHELL_JSON")" ".keyarchy.XXXXXXXXXX")"
