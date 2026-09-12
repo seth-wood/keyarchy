@@ -57,7 +57,10 @@ if [[ -f $HYPRLAND_LUA ]] && grep -qE 'hypr\.(keyarchy|omarkey)-shim' "$HYPRLAND
     echo "keyarchy: removed the shim require from hyprland.lua (backup: $BACKUP)"
   else
     echo "keyarchy: refusing to edit $HYPRLAND_LUA; it would have removed $removed lines" >&2
-    echo "keyarchy: remove the 'hypr.keyarchy-shim' require by hand" >&2
+    echo "keyarchy: remove the 'hypr.keyarchy-shim' require by hand, then re-run uninstall" >&2
+    rm -f -- "$EDIT"
+    trap - EXIT
+    exit 1
   fi
   rm -f -- "$EDIT"
   trap - EXIT

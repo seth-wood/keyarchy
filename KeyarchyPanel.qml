@@ -90,7 +90,9 @@ Panel {
   // rather than waiting for a shell restart.
   function resetProgress() {
     root.state = Model.emptyState()
+    root.usage = Model.emptyMap()
     stateFile.write(JSON.stringify(Model.serializeState(root.state), null, 2) + "\n")
+    usageFile.write("{}\n")
   }
 
   // Read through the same descriptor-bound helper the service uses; the

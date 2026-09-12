@@ -53,6 +53,14 @@ test("classifies the teachable Hyprland events", () => {
   assert.equal(Model.classify("activewindowv2", "0x55").description, "Focus another window")
 })
 
+test("classifies fullscreen from Hyprland address,mode payloads", () => {
+  assert.deepEqual(Model.classify("fullscreen", "0x55,1"), {
+    action: "fullscreen", category: "window", description: "Full screen"
+  })
+  assert.equal(Model.classify("fullscreen", "0x55,0"), null)
+  assert.equal(Model.classify("fullscreen", "0x55,2"), null)
+})
+
 test("stays quiet for events with nothing to teach", () => {
   assert.equal(Model.classify("fullscreen", "0"), null)
   assert.equal(Model.classify("changefloatingmode", "0x55,0"), null)
@@ -81,7 +89,7 @@ test("does not teach fullscreen for the Omarchy screensaver windowrule", () => {
     ["openwindow", "0x1,1,org.omarchy.screensaver,foot"],
     ["activewindow", "org.omarchy.screensaver,foot"],
     ["activewindowv2", "0x1"],
-    ["fullscreen", "1"]
+    ["fullscreen", "0x1,1"]
   ])
 
   assert.equal(focus.className, "org.omarchy.screensaver")
@@ -100,7 +108,7 @@ test("still teaches fullscreen when an ordinary window maps then goes fullscreen
     ["openwindow", "0x2,1,Alacritty,zsh"],
     ["activewindow", "Alacritty,zsh"],
     ["activewindowv2", "0x2"],
-    ["fullscreen", "1"]
+    ["fullscreen", "0x2,1"]
   ])
   assert.ok(queued.includes("fullscreen"))
 })
@@ -168,6 +176,9 @@ test("suppresses delayed openwindow when the beacon named that launch", () => {
 test("suppresses near-synchronous events by beacon timing alone", () => {
   const match = { description: "Close window", action: "close-window" }
   assert.equal(Model.beaconSuppresses(match, 1000, "Close window", 1050, 1300, {}), true)
+  assert.equal(Model.beaconSuppresses(match, 1000, "", 1050, 1300, {}), true)
+  // Unrelated bind within the lead window must not suppress.
+  assert.equal(Model.beaconSuppresses(match, 1000, "Full screen", 1050, 1300, {}), false)
   // Beacon long before the event and for a different action: do not suppress.
   assert.equal(Model.beaconSuppresses(match, 1000, "Full screen", 3000, 3250, {}), false)
 })
@@ -326,11 +337,35 @@ test("workspaceIntentAllows fail-closes workspace teaches without a fresh matchi
   const match = { action: "workspace:3", category: "workspace", description: "Switch to workspace 3" }
   assert.equal(Model.workspaceIntentAllows(match, 0, "", 1000, 1250, {}), false)
   assert.equal(Model.workspaceIntentAllows(match, 1000, "workspace:3", 1050, 1300, {}), true)
+  assert.equal(Model.workspaceIntentAllows(match, 1000, "workspace:3", 1200, 1450, {}), true)
   assert.equal(Model.workspaceIntentAllows(match, 1000, "workspace:2", 1050, 1300, {}), false)
+  assert.equal(Model.workspaceIntentAllows(match, 1100, "workspace:3", 1000, 1250, {}), false)
   assert.equal(Model.workspaceIntentAllows(
     { action: "move-to-workspace:2", category: "workspace", description: "Move window to workspace 2" },
     0, "", 1000, 1250, {}
   ), true)
+})
+
+test("classify keeps comma-containing workspace names", () => {
+  assert.deepEqual(Model.classify("workspacev2", "1,my,desk"), {
+    action: "workspace:my,desk", category: "workspace", description: "Switch to workspace my,desk"
+  })
+  assert.deepEqual(Model.classify("movewindowv2", "0x55,2,my,desk"), {
+    action: "move-to-workspace:my,desk", category: "workspace", description: "Move window to workspace my,desk"
+  })
+})
+
+test("appDescriptionForClass avoids short substring false positives", () => {
+  assert.equal(Model.appDescriptionForClass("zenity"), null)
+  assert.equal(Model.appDescriptionForClass("zen"), "Browser")
+})
+
+test("describeAction preserves colons in workspace names", () => {
+  assert.equal(Model.describeAction("workspace:foo:bar"), "Switch to workspace foo:bar")
+})
+
+test("mergeConfig treats string false as disabled", () => {
+  assert.equal(Model.mergeConfig({ enabled: "false" }).enabled, false)
 })
 
 

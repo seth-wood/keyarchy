@@ -85,10 +85,15 @@ if command -v hyprctl >/dev/null && [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; t
     # Roll back to the exact bytes that were there before, rather than leaving
     # a broken config behind and asking someone to run the uninstaller.
     if [[ -n ${BACKUP:-} && -f $BACKUP ]]; then
-      publish "$BACKUP" "$HYPRLAND_LUA" 644 \
-        && rm -f -- "$SHIM_DEST" \
-        && hyprctl reload >/dev/null \
-        && echo "keyarchy: rolled hyprland.lua back to $BACKUP" >&2
+      if publish "$BACKUP" "$HYPRLAND_LUA" 644; then
+        rm -f -- "$SHIM_DEST"
+        hyprctl reload >/dev/null 2>&1 || true
+        echo "keyarchy: rolled hyprland.lua back to $BACKUP" >&2
+      else
+        echo "keyarchy: rollback failed; restore $BACKUP by hand and remove $SHIM_DEST" >&2
+      fi
+    else
+      echo "keyarchy: no hyprland.lua backup; remove $SHIM_DEST and fix hyprland.lua by hand" >&2
     fi
     exit 1
   fi
