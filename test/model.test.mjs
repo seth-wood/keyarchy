@@ -53,6 +53,14 @@ test("classifies the teachable Hyprland events", () => {
   assert.equal(Model.classify("activewindowv2", "0x55").description, "Focus another window")
 })
 
+test("classifies fullscreen from Hyprland address,mode payloads", () => {
+  assert.deepEqual(Model.classify("fullscreen", "0x55,1"), {
+    action: "fullscreen", category: "window", description: "Full screen"
+  })
+  assert.equal(Model.classify("fullscreen", "0x55,0"), null)
+  assert.equal(Model.classify("fullscreen", "0x55,2"), null)
+})
+
 test("stays quiet for events with nothing to teach", () => {
   assert.equal(Model.classify("fullscreen", "0"), null)
   assert.equal(Model.classify("changefloatingmode", "0x55,0"), null)
@@ -81,7 +89,7 @@ test("does not teach fullscreen for the Omarchy screensaver windowrule", () => {
     ["openwindow", "0x1,1,org.omarchy.screensaver,foot"],
     ["activewindow", "org.omarchy.screensaver,foot"],
     ["activewindowv2", "0x1"],
-    ["fullscreen", "1"]
+    ["fullscreen", "0x1,1"]
   ])
 
   assert.equal(focus.className, "org.omarchy.screensaver")
@@ -100,7 +108,7 @@ test("still teaches fullscreen when an ordinary window maps then goes fullscreen
     ["openwindow", "0x2,1,Alacritty,zsh"],
     ["activewindow", "Alacritty,zsh"],
     ["activewindowv2", "0x2"],
-    ["fullscreen", "1"]
+    ["fullscreen", "0x2,1"]
   ])
   assert.ok(queued.includes("fullscreen"))
 })

@@ -342,8 +342,9 @@ function classify(name, data) {
       return { action: "close-window", category: "window", description: "Close window" }
 
     case "fullscreen":
-      // 0 is leaving fullscreen, which needs no separate lesson.
-      if (String(fields[0]) !== "1") return null
+      // Hyprland sends address,mode — same shape as changefloatingmode. The tests
+      // still pass a bare "1" for mode-only payloads.
+      if (String(fields[1] || fields[0]) !== "1") return null
       return { action: "fullscreen", category: "window", description: "Full screen" }
 
     case "changefloatingmode":
