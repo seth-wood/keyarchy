@@ -148,7 +148,10 @@ function mergeConfig(overrides) {
     if (key === "categories" || key === "muted") continue
     var value = overrides[key]
     if (value === undefined || value === null) continue
-    if (key === "enabled") { config[key] = !!value; continue }
+    if (key === "enabled") {
+      config[key] = value === false || value === "false" || value === 0 ? false : !!value
+      continue
+    }
     var number = Number(value)
     if (!isFinite(number) || number < 0) continue
     config[key] = Math.min(Math.floor(number), LIMITS[key])
@@ -306,6 +309,8 @@ function appDescriptionForClass(windowClass) {
   if (APP_CLASSES[key]) return APP_CLASSES[key]
 
   for (var candidate in APP_CLASSES) {
+    // Short keys like "zen" false-match inside unrelated class names (zenity).
+    if (candidate.length < 5) continue
     if (key.indexOf(candidate) !== -1) return APP_CLASSES[candidate]
   }
   return null
@@ -319,9 +324,9 @@ function classify(name, data) {
 
   switch (String(name || "")) {
     case "workspacev2":
-      // A workspace name is whatever a client last called it, and it ends up
-      // in a notification summary, so it is bounded here at the door.
-      var workspace = plainLabel(fields[1] || fields[0] || "", 48)
+      // Hyprland sends old,new; workspace names may themselves contain commas.
+      var workspaceRaw = fields.length > 2 ? fields.slice(1).join(",") : (fields[1] || fields[0] || "")
+      var workspace = plainLabel(workspaceRaw, 48)
       if (workspace === "") return null
       return {
         action: "workspace:" + workspace,
@@ -330,7 +335,8 @@ function classify(name, data) {
       }
 
     case "movewindowv2":
-      var target = plainLabel(fields[2] || fields[1] || "", 48)
+      var targetRaw = fields.length > 3 ? fields.slice(2).join(",") : (fields[2] || fields[1] || "")
+      var target = plainLabel(targetRaw, 48)
       if (target === "") return null
       return {
         action: "move-to-workspace:" + target,
@@ -416,7 +422,12 @@ function beaconSuppresses(match, lastBeaconAt, lastBeaconDescription, entryAt, n
   var leadMs = options && options.beaconLeadMs != null ? options.beaconLeadMs : 150
   var matchMs = options && options.beaconMatchMs != null ? options.beaconMatchMs : 5000
 
-  if (lastBeaconAt >= entryAt - leadMs) return true
+  if (lastBeaconAt >= entryAt - leadMs) {
+    var earlyBeacon = String(lastBeaconDescription || "")
+    if (earlyBeacon === "") return true
+    if (match && match.hint === "arrows") return /^Focus on .+ window$/.test(earlyBeacon)
+    return earlyBeacon === String(match && match.description || "")
+  }
   if (now - lastBeaconAt > matchMs) return false
 
   var beacon = String(lastBeaconDescription || "")
@@ -441,8 +452,11 @@ function workspaceIntentAllows(match, lastIntentAt, lastIntentAction, entryAt, n
   var matchMs = options && options.intentMatchMs != null ? options.intentMatchMs : 5000
   if (now - lastIntentAt > matchMs) return false
   if (String(lastIntentAction || "") !== String(match.action || "")) return false
-  if (lastIntentAt >= entryAt - leadMs) return true
-  return false
+  // Intent must precede (or coincide with) the workspace event — a bar click
+  // stamps before the switch lands. A stamp after the event is focus fallout.
+  if (lastIntentAt > entryAt) return false
+  if (entryAt - lastIntentAt > matchMs) return false
+  return true
 }
 
 function categoryFor(action) {
@@ -590,8 +604,8 @@ function describeAction(action) {
   var parts = String(action || "").split(":")
 
   switch (parts[0]) {
-    case "workspace": return "Switch to workspace " + parts[1]
-    case "move-to-workspace": return "Move window to workspace " + parts[1]
+    case "workspace": return "Switch to workspace " + parts.slice(1).join(":")
+    case "move-to-workspace": return "Move window to workspace " + parts.slice(1).join(":")
     case "close-window": return "Close window"
     case "fullscreen": return "Full screen"
     case "toggle-float": return "Toggle window floating/tiling"
@@ -616,7 +630,7 @@ function lessonRows(state, config) {
       count: state.counts[action],
       lastAt: state.lastAt[action] || 0,
       graduated: state.counts[action] >= config.lifetimeCap,
-      muted: config.muted.indexOf(action) !== -1
+      muted: (config.muted || []).indexOf(action) !== -1
     })
   }
 

@@ -176,6 +176,9 @@ test("suppresses delayed openwindow when the beacon named that launch", () => {
 test("suppresses near-synchronous events by beacon timing alone", () => {
   const match = { description: "Close window", action: "close-window" }
   assert.equal(Model.beaconSuppresses(match, 1000, "Close window", 1050, 1300, {}), true)
+  assert.equal(Model.beaconSuppresses(match, 1000, "", 1050, 1300, {}), true)
+  // Unrelated bind within the lead window must not suppress.
+  assert.equal(Model.beaconSuppresses(match, 1000, "Full screen", 1050, 1300, {}), false)
   // Beacon long before the event and for a different action: do not suppress.
   assert.equal(Model.beaconSuppresses(match, 1000, "Full screen", 3000, 3250, {}), false)
 })
@@ -334,11 +337,35 @@ test("workspaceIntentAllows fail-closes workspace teaches without a fresh matchi
   const match = { action: "workspace:3", category: "workspace", description: "Switch to workspace 3" }
   assert.equal(Model.workspaceIntentAllows(match, 0, "", 1000, 1250, {}), false)
   assert.equal(Model.workspaceIntentAllows(match, 1000, "workspace:3", 1050, 1300, {}), true)
+  assert.equal(Model.workspaceIntentAllows(match, 1000, "workspace:3", 1200, 1450, {}), true)
   assert.equal(Model.workspaceIntentAllows(match, 1000, "workspace:2", 1050, 1300, {}), false)
+  assert.equal(Model.workspaceIntentAllows(match, 1100, "workspace:3", 1000, 1250, {}), false)
   assert.equal(Model.workspaceIntentAllows(
     { action: "move-to-workspace:2", category: "workspace", description: "Move window to workspace 2" },
     0, "", 1000, 1250, {}
   ), true)
+})
+
+test("classify keeps comma-containing workspace names", () => {
+  assert.deepEqual(Model.classify("workspacev2", "1,my,desk"), {
+    action: "workspace:my,desk", category: "workspace", description: "Switch to workspace my,desk"
+  })
+  assert.deepEqual(Model.classify("movewindowv2", "0x55,2,my,desk"), {
+    action: "move-to-workspace:my,desk", category: "workspace", description: "Move window to workspace my,desk"
+  })
+})
+
+test("appDescriptionForClass avoids short substring false positives", () => {
+  assert.equal(Model.appDescriptionForClass("zenity"), null)
+  assert.equal(Model.appDescriptionForClass("zen"), "Browser")
+})
+
+test("describeAction preserves colons in workspace names", () => {
+  assert.equal(Model.describeAction("workspace:foo:bar"), "Switch to workspace foo:bar")
+})
+
+test("mergeConfig treats string false as disabled", () => {
+  assert.equal(Model.mergeConfig({ enabled: "false" }).enabled, false)
 })
 
 

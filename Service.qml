@@ -284,6 +284,7 @@ Item {
     // against the Hyprland event and must not wait for a helper to start.
     onWatchFired: {
       root.lastBeaconAt = Date.now()
+      root.lastBeaconDescription = ""
       root.countNextBeacon = true
     }
     onLoaded: function(text) {
@@ -295,7 +296,10 @@ Item {
         root.countUsage(description)
       }
     }
-    onFailed: root.readRefused("last-bind")
+    onFailed: {
+      root.countNextBeacon = false
+      root.readRefused("last-bind")
+    }
   }
 
   BoundedFile {
@@ -306,8 +310,10 @@ Item {
     fileName: "last-workspace-intent"
     active: root.runtimeStateDir !== ""
     watchPath: root.runtimeStateDir === "" ? "" : root.runtimeStateDir + "/last-workspace-intent"
-    onWatchFired: root.lastWorkspaceIntentAt = Date.now()
-    onLoaded: function(text) { root.noteWorkspaceIntent(text) }
+    onLoaded: function(text) {
+      root.lastWorkspaceIntentAt = Date.now()
+      root.noteWorkspaceIntent(text)
+    }
     onFailed: root.readRefused("last-workspace-intent")
   }
 
