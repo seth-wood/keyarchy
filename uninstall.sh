@@ -10,6 +10,8 @@ export PATH
 PLUGIN_ID="slw.keyarchy"
 PLUGIN_DEST="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
 
+fail() { echo "keyarchy: $*" >&2; exit 1; }
+
 # Installed via `omarchy plugin add`, this script lives inside the folder it is
 # about to delete, and bash reads a script as it runs. Re-exec from a copy.
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
@@ -89,6 +91,7 @@ omarchy plugin disable slw.omarkey >/dev/null 2>&1 || true
 # so the bar does not hold a slot for a plugin that no longer exists.
 SHELL_JSON="$HOME/.config/omarchy/shell.json"
 if [[ -f $SHELL_JSON ]] && grep -qE 'slw\.(keyarchy|omarkey)' "$SHELL_JSON"; then
+  command -v jq >/dev/null || fail "jq not found on PATH (needed to clean shell.json)"
   tmp="$(mktemp -p "$(dirname -- "$SHELL_JSON")" ".keyarchy.XXXXXXXXXX")"
   jq '
     (.bar.layout // {}) |= with_entries(.value |= map(select(.id != "slw.keyarchy" and .id != "slw.omarkey")))

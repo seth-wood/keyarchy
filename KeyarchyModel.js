@@ -355,7 +355,8 @@ function classify(name, data) {
 
     case "changefloatingmode":
       // 0 is leaving floating (back to tiling); only teach the float direction.
-      if (String(fields[1]) !== "1") return null
+      // Hyprland sends address,mode — same shape as fullscreen.
+      if (String(fields[1] || fields[0]) !== "1") return null
       return {
         action: "toggle-float",
         category: "window",
@@ -471,6 +472,12 @@ function shouldNotify(action, now, state, config) {
   if (category && config.categories[category] === false) return false
   if (config.muted && config.muted.indexOf(action) !== -1) return false
   if ((state.counts[action] || 0) >= config.lifetimeCap) return false
+
+  if (state.counts[action] === undefined) {
+    var tracked = 0
+    for (var key in state.counts) tracked++
+    if (tracked >= MAX_TRACKED_ACTIONS) return false
+  }
 
   // An absent timestamp means "never taught", which must not read as
   // "taught at epoch 0" and get swallowed by the cooldown.

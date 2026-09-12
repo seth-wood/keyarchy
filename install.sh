@@ -39,6 +39,7 @@ publish() {
 }
 
 command -v omarchy >/dev/null || fail "omarchy not found on PATH"
+command -v jq >/dev/null || fail "jq not found on PATH (needed for shell.json migration)"
 [[ -f $HYPRLAND_LUA ]] || fail "missing $HYPRLAND_LUA"
 
 omarchy plugin validate "$SRC" >/dev/null || fail "plugin manifest failed validation"
@@ -49,7 +50,6 @@ if [[ -d $OLD_PLUGIN_DEST ]] || [[ -f $OLD_SHIM_DEST ]] \
   echo "keyarchy: migrating from omarkey"
   omarchy plugin disable "$OLD_PLUGIN_ID" >/dev/null 2>&1 || true
   rm -rf "$OLD_PLUGIN_DEST"
-  rm -f "$OLD_SHIM_DEST"
   if [[ ${XDG_RUNTIME_DIR:-} =~ ^/run/user/[0-9]+/?$ ]]; then
     runtime="${XDG_RUNTIME_DIR%/}"
     rm -f -- "$runtime/omarkey/binds.json" "$runtime/omarkey/last-bind" \
@@ -87,11 +87,15 @@ if [[ -d $OLD_PLUGIN_DEST ]] || [[ -f $OLD_SHIM_DEST ]] \
       "$HYPRLAND_LUA" >"$edit"
     if [[ "$(wc -l <"$edit")" -eq "$(wc -l <"$HYPRLAND_LUA")" ]]; then
       publish "$edit" "$HYPRLAND_LUA"
+      rm -f "$OLD_SHIM_DEST"
       echo "keyarchy: renamed the shim require in hyprland.lua (backup: $backup)"
     else
       echo "keyarchy: refusing to edit $HYPRLAND_LUA; the rename changed its length" >&2
+      echo "keyarchy: left $OLD_SHIM_DEST in place until hyprland.lua is updated" >&2
     fi
     rm -f -- "$edit"
+  elif [[ -f $OLD_SHIM_DEST ]]; then
+    rm -f "$OLD_SHIM_DEST"
   fi
 fi
 
