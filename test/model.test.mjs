@@ -453,6 +453,19 @@ test("state stops tracking new actions rather than growing without bound", () =>
   assert.equal(Object.keys(state.counts).length, 500)
 })
 
+test("shouldNotify stops new actions once the tracking cap is reached", () => {
+  const state = Model.emptyState()
+  for (let i = 0; i < 500; i++) {
+    Model.recordNotified("workspace:" + i, 1000, state, { description: "w" }, "SUPER + 1")
+  }
+  const config = Model.defaultConfig()
+  assert.equal(Model.shouldNotify("workspace:999", 2000, state, config), false)
+})
+
+test("classifies changefloatingmode from mode-only payloads", () => {
+  assert.equal(Model.classify("changefloatingmode", "1").description, "Toggle window floating/tiling")
+})
+
 test("settings from shell.json are range-checked, not just copied", () => {
   const config = Model.mergeConfig({ cooldownMs: "not a number", lifetimeCap: -5, globalGapMs: 1e12 })
   assert.equal(config.cooldownMs, 300000)    // kept the default

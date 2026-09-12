@@ -115,6 +115,10 @@ Item {
 
   function loadUsage(text) {
     root.usage = Model.parseCounts(text)
+    // A write from the panel (reset) or another process must win over a
+    // debounced persist that was queued before the file changed.
+    root.usageDirty = false
+    usagePersistTimer.stop()
   }
 
   // A refused read is not an empty file. Keeping what is already in memory
@@ -156,6 +160,14 @@ Item {
 
   function loadState(text) {
     root.state = Model.parseState(text)
+    // Panel reset rewrites state.json; drop queued teaches that would fire
+    // after the history was cleared.
+    var tracked = 0
+    for (var key in root.state.counts) tracked++
+    if (tracked === 0 && root.state.lastAnyAt === 0) {
+      root.pending = []
+      verdictTimer.stop()
+    }
   }
 
   function persistState() {
@@ -323,6 +335,7 @@ Item {
     environment: root.helperEnvironment
     rootName: "state"
     fileName: "usage.json"
+    watchPath: root.stateDir + "/usage.json"
     onLoaded: function(text) { root.loadUsage(text) }
     onFailed: root.readRefused("usage.json")
   }
@@ -379,7 +392,18 @@ Item {
     }
   }
 
-  Process { id: notifyProcess }
+  readonly property var notifyEnvironment: ({
+    "HOME": root.home,
+    "XDG_RUNTIME_DIR": Quickshell.env("XDG_RUNTIME_DIR") || "",
+    "DBUS_SESSION_BUS_ADDRESS": Quickshell.env("DBUS_SESSION_BUS_ADDRESS") || "",
+    "PATH": "/usr/bin"
+  })
+
+  Process {
+    id: notifyProcess
+    clearEnvironment: true
+    environment: root.notifyEnvironment
+  }
 
   Timer {
     id: notifyDeadline
