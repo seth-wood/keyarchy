@@ -453,9 +453,10 @@ function workspaceIntentAllows(match, lastIntentAt, lastIntentAction, entryAt, n
   var matchMs = options && options.intentMatchMs != null ? options.intentMatchMs : 5000
   if (now - lastIntentAt > matchMs) return false
   if (String(lastIntentAction || "") !== String(match.action || "")) return false
-  // Intent must precede (or coincide with) the workspace event — a bar click
-  // stamps before the switch lands. A stamp after the event is focus fallout.
-  if (lastIntentAt > entryAt) return false
+  // Intent must precede the workspace event — the shim writes it before it
+  // dispatches. leadMs absorbs the inotify watch and the Hyprland socket being
+  // delivered in either order; a stamp later than that is focus fallout.
+  if (lastIntentAt > entryAt + leadMs) return false
   if (entryAt - lastIntentAt > matchMs) return false
   return true
 }
