@@ -339,7 +339,10 @@ test("workspaceIntentAllows fail-closes workspace teaches without a fresh matchi
   assert.equal(Model.workspaceIntentAllows(match, 1000, "workspace:3", 1050, 1300, {}), true)
   assert.equal(Model.workspaceIntentAllows(match, 1000, "workspace:3", 1200, 1450, {}), true)
   assert.equal(Model.workspaceIntentAllows(match, 1000, "workspace:2", 1050, 1300, {}), false)
-  assert.equal(Model.workspaceIntentAllows(match, 1100, "workspace:3", 1000, 1250, {}), false)
+  // Watch and socket can arrive in either order: within intentLeadMs is a click.
+  assert.equal(Model.workspaceIntentAllows(match, 1100, "workspace:3", 1000, 1250, {}), true)
+  assert.equal(Model.workspaceIntentAllows(match, 1151, "workspace:3", 1000, 1300, {}), false)
+  assert.equal(Model.workspaceIntentAllows(match, 1050, "workspace:3", 1000, 1300, { intentLeadMs: 20 }), false)
   assert.equal(Model.workspaceIntentAllows(
     { action: "move-to-workspace:2", category: "workspace", description: "Move window to workspace 2" },
     0, "", 1000, 1250, {}

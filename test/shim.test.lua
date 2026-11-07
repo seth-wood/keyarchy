@@ -37,7 +37,12 @@ local function slurp(path)
   return contents
 end
 
-for _, name in ipairs(managed) do saved[name] = slurp(temp_dir .. name) end
+-- Start from empty files: a working live shim leaves them behind, and the
+-- "does not write" checks below read absence. restore() puts them back.
+for _, name in ipairs(managed) do
+  saved[name] = slurp(temp_dir .. name)
+  os.remove(temp_dir .. name)
+end
 
 local function restore()
   for _, name in ipairs(managed) do

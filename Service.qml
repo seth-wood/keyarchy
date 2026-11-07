@@ -322,10 +322,15 @@ Item {
     fileName: "last-workspace-intent"
     active: root.runtimeStateDir !== ""
     watchPath: root.runtimeStateDir === "" ? "" : root.runtimeStateDir + "/last-workspace-intent"
-    onLoaded: function(text) {
+    // Same as last-bind: stamp on the watch event, not on the read. The read
+    // waits on a helper process and lands 70-150 ms after the workspace event,
+    // which made every bar click look like focus fallout (issue #8). Clearing
+    // the action means a stale one cannot pair with the fresh stamp.
+    onWatchFired: {
       root.lastWorkspaceIntentAt = Date.now()
-      root.noteWorkspaceIntent(text)
+      root.lastWorkspaceIntentAction = ""
     }
+    onLoaded: function(text) { root.noteWorkspaceIntent(text) }
     onFailed: root.readRefused("last-workspace-intent")
   }
 
